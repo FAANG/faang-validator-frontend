@@ -21,6 +21,7 @@ server = app.server  # Expose server variable for gunicorn
 app.layout = html.Div([
     html.Div([
         html.H1("FAANG Validation"),
+        html.Div(id='dummy-output-for-reset'),
         # Store for uploaded file data
         dcc.Store(id='stored-file-data'),
         dcc.Store(id='stored-filename'),
@@ -113,6 +114,25 @@ app.layout = html.Div([
                             id='validate-button-container',
                             style={'display': 'none', 'marginLeft': '10px'}  # Initially hidden
                         ),
+                        html.Div(
+                            html.Button(
+                                'Reset',
+                                id='reset-button',
+                                n_clicks=0,
+                                className='reset-button',
+                                style={
+                                    'backgroundColor': '#f44336',
+                                    'color': 'white',
+                                    'padding': '10px 20px',
+                                    'border': 'none',
+                                    'borderRadius': '4px',
+                                    'cursor': 'pointer',
+                                    'fontSize': '16px',
+                                }
+                            ),
+                            id='reset-button-container',
+                            style={'display': 'none', 'marginLeft': '10px'}
+                        ),
                     ], style={'display': 'flex', 'alignItems': 'center'}),
                     html.Div(id='selected-file-display', style={'display': 'none'}),
                 ], style={'margin': '20px 0'}),
@@ -182,14 +202,15 @@ def store_file_data(contents, filename):
 # Callback to show and enable validate button when a file is uploaded
 @app.callback(
     [Output('validate-button', 'disabled'),
-     Output('validate-button-container', 'style')],
+     Output('validate-button-container', 'style'),
+     Output('reset-button-container', 'style')],
     [Input('stored-file-data', 'data')]
 )
-def show_and_enable_validate_button(file_data):
+def show_and_enable_buttons(file_data):
     if file_data is None:
-        return True, {'display': 'none', 'marginLeft': '10px'}
+        return True, {'display': 'none', 'marginLeft': '10px'}, {'display': 'none', 'marginLeft': '10px'}
     else:
-        return False, {'display': 'block', 'marginLeft': '10px'}
+        return False, {'display': 'block', 'marginLeft': '10px'}, {'display': 'block', 'marginLeft': '10px'}
 
 # Callback to validate data when button is clicked
 @app.callback(
@@ -810,6 +831,21 @@ def _df(records):
     lead = [c for c in ["Sample Name"] if c in df.columns]
     other = [c for c in df.columns if c not in lead]
     return df[lead + other]
+
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (n_clicks > 0) {
+            window.location.reload();
+        }
+        return '';
+    }
+    """,
+    Output('dummy-output-for-reset', 'children'),
+    [Input('reset-button', 'n_clicks')],
+    prevent_initial_call=True
+)
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8050))
