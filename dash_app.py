@@ -3,6 +3,7 @@ import os
 import base64
 import io
 import dash
+import requests
 from dash import dcc, html, dash_table
 from dash.dash_table import DataTable
 from dash.dependencies import Input, Output, State, MATCH, ALL
@@ -214,14 +215,31 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
     json_validation_results = None
 
     try:
-        with open('validation_results.json', 'r') as f:
-            response_json = json.load(f)
+        # with open('validation_results.json', 'r') as f:
+        #     response_json = json.load(f)
+
+
+        content_type, content_string = contents.split(',')
+        decoded = io.BytesIO(base64.b64decode(content_string))
+
+        # Send the file to the API
+        files = {'file': (filename, decoded, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
+        response = requests.post(
+            'https://faang-validator-backend-service-964531885708.europe-west2.run.app/validate-file',
+            files=files,
+            headers={'accept': 'application/json'}
+        )
+        # Handle response and parse as JSON
+        if response.status_code == 200:
+            response_json = response.json()
+        else:
+            raise Exception(f"Error {response.status_code}: {response.text}")
 
         print("Using validation_results.json file for validation results")
 
-        if isinstance(response_json, dict) and 'validation_results' in response_json:
+        if isinstance(response_json, dict) and 'results' in response_json:
             json_validation_results = response_json
-            validation_results = response_json['validation_results']
+            validation_results = response_json['results']
             total_summary = validation_results.get('total_summary', {})
             valid_count = total_summary.get('valid_samples', 0)
             invalid_count = total_summary.get('invalid_samples', 0)
@@ -442,10 +460,10 @@ def populate_validation_results_tabs(validation_results):
     if validation_results is None:
         return []
 
-    if 'validation_results' not in validation_results:
+    if 'results' not in validation_results:
         return []
 
-    validation_data = validation_results['validation_results']
+    validation_data = validation_results['results']
     sample_types = validation_data.get('sample_types_processed', [])
 
     if not sample_types:
@@ -455,7 +473,7 @@ def populate_validation_results_tabs(validation_results):
     for sample_type in sample_types:
         results_by_type = validation_data.get('results_by_type', {})
         st_data = results_by_type.get(sample_type, {})
-        invalid_key = f"invalid_{sample_type}s"
+        invalid_key = f"invalid_{sample_type.replace(' ', '_')}s"
         if invalid_key.endswith('ss'): # fix for pool of specimens
             invalid_key = invalid_key[:-1]
         
@@ -499,7 +517,7 @@ def populate_sample_type_content(selected_sample_type, validation_results):
     if validation_results is None or selected_sample_type is None:
         return []
 
-    validation_data = validation_results['validation_results']
+    validation_data = validation_results['results']
     results_by_type = validation_data.get('results_by_type', {})
 
     if selected_sample_type not in results_by_type:
@@ -665,8 +683,8 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict):
     summary = st_data.get("summary", {})
 
     # Use dynamic keys based on sample type
-    valid_key = f"valid_{sample_type}s"
-    invalid_key = f"invalid_{sample_type}s"
+    valid_key = f"valid_{sample_type.replace(' ', '_')}s"
+    invalid_key = f"invalid_{sample_type.replace(' ', '_')}s"
     if invalid_key.endswith('ss'): # fix for pool of specimens
         invalid_key = invalid_key[:-1]
 
@@ -688,8 +706,8 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict):
     rows_for_df = []
     for row in invalid_rows:
         row_copy = row.copy()
-        if 'errors' in row_copy:
-            del row_copy['errors']
+        if 'field_errors' in row_copy:
+            del row_copy['field_errors']
         if 'warnings' in row_copy:
             del row_copy['warnings']
         rows_for_df.append(row_copy)
@@ -699,20 +717,20 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict):
     tooltip_data = []
     for row in invalid_rows:
         tooltips = {}
-        if 'errors' in row:
-            for field, error in row['errors'].items():
+        if 'field_errors' in row:
+            for field, error in row['field_errors'].items():
                 if field in df.columns:
                     tooltips[field] = {'value': f"Error: {field} - {', '.join(error)}", 'type': 'markdown'}
         tooltip_data.append(tooltips)
         
-    warnings_component = []
-    if warning_rows:
-        warnings_component.append(html.H4("Records With Warnings", style={'textAlign': 'center', 'margin': '10px 0'}))
-        warnings_list = []
-        for row in warning_rows:
-            warnings_list.append(html.P(f"Sample: {row['Sample Name']}"))
-            warnings_list.append(html.Ul([html.Li(w) for w in row['warnings']]))
-        warnings_component.append(html.Div(warnings_list))
+    # warnings_component = []
+    # if warning_rows:
+    #     warnings_component.append(html.H4("Records With Warnings", style={'textAlign': 'center', 'margin': '10px 0'}))
+    #     warnings_list = []
+    #     for row in warning_rows:
+    #         warnings_list.append(html.P(f"Sample: {row['Sample Name']}"))
+    #         warnings_list.append(html.Ul([html.Li(w) for w in row['warnings']]))
+    #     warnings_component.append(html.Div(warnings_list))
 
     return html.Div([
         html.H4("Records With Error", style={'textAlign': 'center', 'margin': '10px 0'}),
@@ -741,7 +759,7 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict):
                 tooltip_duration=None
             )
         ], id={"type": "table-container", "sample_type": sample_type, "panel_id": panel_id}, style={'display': 'block'}),
-        html.Div(warnings_component)
+
     ])
 
 def _flatten_data_rows(rows, include_errors=False):
@@ -776,11 +794,11 @@ def _flatten_data_rows(rows, include_errors=False):
         if include_errors:
             errors = r.get("errors", {})
             if isinstance(errors, dict) and "field_errors" in errors:
-                base['errors'] = errors["field_errors"]
+                base['field_errors'] = errors["field_errors"]
         
         warnings = r.get("warnings", [])
         if warnings:
-            base['warnings'] = warnings
+            base['warnings'] = ''.join(warnings)
             
         flat.append(base)
     return flat
