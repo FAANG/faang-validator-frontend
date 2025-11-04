@@ -32,6 +32,8 @@ app.layout = html.Div([
         dcc.Store(id='active-sheet', data=None),
         dcc.Store(id='stored-json-validation-results', data=None),
 
+        dcc.Download(id='download-table-csv'),
+
         # Error popup
         html.Div(
             id='error-popup-container',
@@ -487,6 +489,118 @@ def close_error_popup(close_clicks, overlay_clicks):
     return {'display': 'none'}
 
 
+@app.callback(
+    Output('download-table-csv', 'data'),
+    Input('download-errors-btn', 'n_clicks'),
+    State('stored-json-validation-results', 'data'),
+    prevent_initial_call=True
+)
+def download_annotated_xlsx(n_clicks, validation_results):
+    from openpyxl.styles import PatternFill
+    from openpyxl.comments import Comment
+
+    if not n_clicks or not validation_results or 'results' not in validation_results:
+        raise PreventUpdate
+
+    validation_data = validation_results['results']
+    results_by_type = validation_data.get('results_by_type', {}) or {}
+    sample_types = validation_data.get('sample_types_processed', []) or []
+
+    excel_sheets = {}
+
+    for sample_type in sample_types:
+        st_data = results_by_type.get(sample_type, {}) or {}
+        st_key = sample_type.replace(' ', '_')
+
+        invalid_key = f"invalid_{st_key}s"
+        if invalid_key.endswith('ss'):
+            invalid_key = invalid_key[:-1]
+        valid_key = f"valid_{st_key}s"
+
+        invalid_rows_full = _flatten_data_rows(st_data.get(invalid_key), include_errors=True) or []
+        rows_for_df_err = []
+        for r in invalid_rows_full:
+            rc = r.copy()
+            rc.pop('errors', None)
+            rc.pop('warnings', None)
+            rows_for_df_err.append(rc)
+        df_err = _df(rows_for_df_err)
+
+        valid_rows_full = _flatten_data_rows(st_data.get(valid_key)) or []
+        warning_rows_full = [r for r in valid_rows_full if r.get('warnings')]
+        rows_for_df_warn = []
+        for r in warning_rows_full:
+            rc = r.copy()
+            rc.pop('warnings', None)
+            rows_for_df_warn.append(rc)
+        df_warn = _df(rows_for_df_warn)
+
+        if not df_err.empty:
+            excel_sheets[f"{st_key[:25]}_errors"] = {"df": df_err, "rows": invalid_rows_full, "mode": "error"}
+        if not df_warn.empty:
+            excel_sheets[f"{st_key[:24]}_warnings"] = {"df": df_warn, "rows": warning_rows_full, "mode": "warn"}
+
+    if not excel_sheets:
+        raise PreventUpdate
+
+    buffer = io.BytesIO()
+
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        for sheet_name, payload in excel_sheets.items():
+            payload["df"].to_excel(writer, sheet_name=sheet_name[:31], index=False)
+
+        wb = writer.book
+        red_fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
+        yellow_fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
+
+        for sheet_name, payload in excel_sheets.items():
+            ws = wb[sheet_name[:31]]
+            df = payload["df"]
+            mode = payload["mode"]
+            rows_full = payload["rows"]
+            cols = list(df.columns)
+
+            for i, raw in enumerate(rows_full, start=2):
+                if mode == "error":
+                    row_err = raw.get("errors") or {}
+                    if isinstance(row_err, dict) and "field_errors" in row_err:
+                        row_err = row_err["field_errors"]
+
+                    for field, msgs in (row_err or {}).items():
+                        col_name = _resolve_col(field, cols)
+                        if not col_name:
+                            continue
+                        c_idx = cols.index(col_name) + 1
+                        cell = ws.cell(row=i, column=c_idx)
+
+                        msgs_list = [str(m) for m in (msgs if isinstance(msgs, list) else [msgs])]
+                        is_extra_only = all("extra inputs are not permitted" in m.lower() for m in msgs_list)
+
+                        if is_extra_only:
+                            cell.fill = yellow_fill
+                            text = "Warning: " + field + " — " + " | ".join(msgs_list)
+                        else:
+                            cell.fill = red_fill
+                            text = "Error: " + field + " — " + " | ".join(msgs_list)
+
+                        cell.comment = Comment(text, "FAANG Validator")
+
+                else:
+                    by_field = _warnings_by_field(raw.get("warnings", []))
+                    for field, msgs in (by_field or {}).items():
+                        col_name = _resolve_col(field, cols)
+                        if not col_name:
+                            continue
+                        c_idx = cols.index(col_name) + 1
+                        cell = ws.cell(row=i, column=c_idx)
+                        cell.fill = yellow_fill
+                        text = "Warning: " + field + " — " + " | ".join(map(str, msgs))
+                        cell.comment = Comment(text, "FAANG Validator")
+
+    buffer.seek(0)
+    return dcc.send_bytes(buffer.getvalue(), "annotated.xlsx")
+
+
 # Callback to populate validation results tabs
 @app.callback(
     Output('validation-results-container', 'children'),
@@ -531,17 +645,41 @@ def populate_validation_results_tabs(validation_results):
     if not sample_type_tabs:
         return html.Div("No invalid records found.")
 
-    tabs = html.Div([
-        dcc.Tabs(
-            id='sample-type-tabs',
-            value=sample_type_tabs[0].value if sample_type_tabs else None,
-            children=sample_type_tabs,
-            style={'border': 'none'},
-            colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"}
-        )
-    ])
+    tabs = dcc.Tabs(
+        id='sample-type-tabs',
+        value=sample_type_tabs[0].value if sample_type_tabs else None,
+        children=sample_type_tabs,
+        style={'border': 'none'},
+        colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"}
+    )
 
-    return tabs
+    header_bar = html.Div(
+        [
+            html.Div(),
+            html.Button(
+                "Download annotated template",
+                id="download-errors-btn",
+                n_clicks=0,
+                style={
+                    'backgroundColor': '#1976d2',
+                    'color': 'white',
+                    'padding': '8px 14px',
+                    'border': 'none',
+                    'borderRadius': '4px',
+                    'cursor': 'pointer',
+                    'fontSize': '14px'
+                }
+            ),
+        ],
+        style={
+            'display': 'flex',
+            'justifyContent': 'space-between',
+            'alignItems': 'center',
+            'marginBottom': '10px'
+        }
+    )
+
+    return html.Div([header_bar, tabs])
 
 
 # Callback to populate sample type content when tab is selected
