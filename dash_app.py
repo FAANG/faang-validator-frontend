@@ -1,4 +1,3 @@
-import json
 import os
 import base64
 import io
@@ -496,8 +495,6 @@ def close_error_popup(close_clicks, overlay_clicks):
     prevent_initial_call=True
 )
 def download_annotated_xlsx(n_clicks, validation_results):
-    from openpyxl.styles import PatternFill
-    from openpyxl.comments import Comment
 
     if not n_clicks or not validation_results or 'results' not in validation_results:
         raise PreventUpdate
@@ -545,22 +542,35 @@ def download_annotated_xlsx(n_clicks, validation_results):
 
     buffer = io.BytesIO()
 
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
         for sheet_name, payload in excel_sheets.items():
             payload["df"].to_excel(writer, sheet_name=sheet_name[:31], index=False)
 
-        wb = writer.book
-        red_fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
-        yellow_fill = PatternFill(start_color="FFF4CC", end_color="FFF4CC", fill_type="solid")
+        book = writer.book
+        fmt_red = book.add_format({"bg_color": "#FFCCCC"})
+        fmt_yellow = book.add_format({"bg_color": "#FFF4CC"})
+
+        comment_opts = {"visible": False, "x_scale": 1.5, "y_scale": 1.8}
+
+        def _short(kind, field, msgs):
+            return (f"{kind}: {field} — " + " | ".join(str(m) for m in msgs)).replace(" | ", "\n• ")
+
+        def _add_prompt(ws, r, c, title, full_text):
+            ws.data_validation(r, c, r, c, {
+                "validate": "any",
+                "input_title": title[:32],
+                "input_message": full_text[:3000],
+                "show_input": True
+            })
 
         for sheet_name, payload in excel_sheets.items():
-            ws = wb[sheet_name[:31]]
+            ws = writer.sheets[sheet_name[:31]]
             df = payload["df"]
+            cols = list(df.columns)
             mode = payload["mode"]
             rows_full = payload["rows"]
-            cols = list(df.columns)
 
-            for i, raw in enumerate(rows_full, start=2):
+            for i, raw in enumerate(rows_full, start=1):
                 if mode == "error":
                     row_err = raw.get("errors") or {}
                     if isinstance(row_err, dict) and "field_errors" in row_err:
@@ -570,20 +580,25 @@ def download_annotated_xlsx(n_clicks, validation_results):
                         col_name = _resolve_col(field, cols)
                         if not col_name:
                             continue
-                        c_idx = cols.index(col_name) + 1
-                        cell = ws.cell(row=i, column=c_idx)
+                        c = cols.index(col_name)
 
-                        msgs_list = [str(m) for m in (msgs if isinstance(msgs, list) else [msgs])]
-                        is_extra_only = all("extra inputs are not permitted" in m.lower() for m in msgs_list)
+                        value = df.iat[i - 1, c] if (i - 1) < len(df) else ""
+                        msgs_list = msgs if isinstance(msgs, list) else [msgs]
+                        only_extra = all("extra inputs are not permitted" in str(m).lower() for m in msgs_list)
 
-                        if is_extra_only:
-                            cell.fill = yellow_fill
-                            text = "Warning: " + field + " — " + " | ".join(msgs_list)
+                        if only_extra:
+                            ws.write(i, c, value, fmt_yellow)
+                            kind = "Warning"
                         else:
-                            cell.fill = red_fill
-                            text = "Error: " + field + " — " + " | ".join(msgs_list)
+                            ws.write(i, c, value, fmt_red)
+                            kind = "Error"
 
-                        cell.comment = Comment(text, "FAANG Validator")
+                        text = _short(kind, field, msgs_list)
+                        ws.write_comment(i, c, text, comment_opts)
+
+                        long_text = f"{kind}: {field} — " + " | ".join(str(m) for m in msgs_list)
+                        if len(long_text) > 800:
+                            _add_prompt(ws, i, c, field, long_text)
 
                 else:
                     by_field = _warnings_by_field(raw.get("warnings", []))
@@ -591,11 +606,16 @@ def download_annotated_xlsx(n_clicks, validation_results):
                         col_name = _resolve_col(field, cols)
                         if not col_name:
                             continue
-                        c_idx = cols.index(col_name) + 1
-                        cell = ws.cell(row=i, column=c_idx)
-                        cell.fill = yellow_fill
-                        text = "Warning: " + field + " — " + " | ".join(map(str, msgs))
-                        cell.comment = Comment(text, "FAANG Validator")
+                        c = cols.index(col_name)
+                        value = df.iat[i - 1, c] if (i - 1) < len(df) else ""
+                        ws.write(i, c, value, fmt_yellow)
+
+                        msgs_list = msgs if isinstance(msgs, list) else [msgs]
+                        text = _short("Warning", field, msgs_list)
+                        ws.write_comment(i, c, text, comment_opts)
+
+                        if len(text) > 800:
+                            _add_prompt(ws, i, c, field, text)
 
     buffer.seek(0)
     return dcc.send_bytes(buffer.getvalue(), "annotated.xlsx")
@@ -661,13 +681,13 @@ def populate_validation_results_tabs(validation_results):
                 id="download-errors-btn",
                 n_clicks=0,
                 style={
-                    'backgroundColor': '#1976d2',
-                    'color': 'white',
-                    'padding': '8px 14px',
+                    'backgroundColor': '#ffd740',
+                    'color': 'black',
+                    'padding': '10px 20px',
                     'border': 'none',
                     'borderRadius': '4px',
                     'cursor': 'pointer',
-                    'fontSize': '14px'
+                    'fontSize': '16px'
                 }
             ),
         ],

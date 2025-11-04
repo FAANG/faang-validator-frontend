@@ -5,4 +5,4 @@ dash-html-components
 dash-table
 pandas
 gunicorn
-openpyxl
+xlsxwriter
