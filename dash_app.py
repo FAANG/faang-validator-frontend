@@ -1,4 +1,3 @@
-import json
 import os
 import base64
 import io
@@ -31,6 +30,8 @@ app.layout = html.Div([
         dcc.Store(id='error-popup-data', data={'visible': False, 'column': '', 'error': ''}),
         dcc.Store(id='active-sheet', data=None),
         dcc.Store(id='stored-json-validation-results', data=None),
+
+        dcc.Download(id='download-table-csv'),
 
         # Error popup
         html.Div(
@@ -487,6 +488,139 @@ def close_error_popup(close_clicks, overlay_clicks):
     return {'display': 'none'}
 
 
+@app.callback(
+    Output('download-table-csv', 'data'),
+    Input('download-errors-btn', 'n_clicks'),
+    State('stored-json-validation-results', 'data'),
+    prevent_initial_call=True
+)
+def download_annotated_xlsx(n_clicks, validation_results):
+
+    if not n_clicks or not validation_results or 'results' not in validation_results:
+        raise PreventUpdate
+
+    validation_data = validation_results['results']
+    results_by_type = validation_data.get('results_by_type', {}) or {}
+    sample_types = validation_data.get('sample_types_processed', []) or []
+
+    excel_sheets = {}
+
+    for sample_type in sample_types:
+        st_data = results_by_type.get(sample_type, {}) or {}
+        st_key = sample_type.replace(' ', '_')
+
+        invalid_key = f"invalid_{st_key}s"
+        if invalid_key.endswith('ss'):
+            invalid_key = invalid_key[:-1]
+        valid_key = f"valid_{st_key}s"
+
+        invalid_rows_full = _flatten_data_rows(st_data.get(invalid_key), include_errors=True) or []
+        rows_for_df_err = []
+        for r in invalid_rows_full:
+            rc = r.copy()
+            rc.pop('errors', None)
+            rc.pop('warnings', None)
+            rows_for_df_err.append(rc)
+        df_err = _df(rows_for_df_err)
+
+        valid_rows_full = _flatten_data_rows(st_data.get(valid_key)) or []
+        warning_rows_full = [r for r in valid_rows_full if r.get('warnings')]
+        rows_for_df_warn = []
+        for r in warning_rows_full:
+            rc = r.copy()
+            rc.pop('warnings', None)
+            rows_for_df_warn.append(rc)
+        df_warn = _df(rows_for_df_warn)
+
+        if not df_err.empty:
+            excel_sheets[f"{st_key[:25]}_errors"] = {"df": df_err, "rows": invalid_rows_full, "mode": "error"}
+        if not df_warn.empty:
+            excel_sheets[f"{st_key[:24]}_warnings"] = {"df": df_warn, "rows": warning_rows_full, "mode": "warn"}
+
+    if not excel_sheets:
+        raise PreventUpdate
+
+    buffer = io.BytesIO()
+
+    with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+        for sheet_name, payload in excel_sheets.items():
+            payload["df"].to_excel(writer, sheet_name=sheet_name[:31], index=False)
+
+        book = writer.book
+        fmt_red = book.add_format({"bg_color": "#FFCCCC"})
+        fmt_yellow = book.add_format({"bg_color": "#FFF4CC"})
+
+        comment_opts = {"visible": False, "x_scale": 1.5, "y_scale": 1.8}
+
+        def _short(kind, field, msgs):
+            return (f"{kind}: {field} — " + " | ".join(str(m) for m in msgs)).replace(" | ", "\n• ")
+
+        def _add_prompt(ws, r, c, title, full_text):
+            ws.data_validation(r, c, r, c, {
+                "validate": "any",
+                "input_title": title[:32],
+                "input_message": full_text[:3000],
+                "show_input": True
+            })
+
+        for sheet_name, payload in excel_sheets.items():
+            ws = writer.sheets[sheet_name[:31]]
+            df = payload["df"]
+            cols = list(df.columns)
+            mode = payload["mode"]
+            rows_full = payload["rows"]
+
+            for i, raw in enumerate(rows_full, start=1):
+                if mode == "error":
+                    row_err = raw.get("errors") or {}
+                    if isinstance(row_err, dict) and "field_errors" in row_err:
+                        row_err = row_err["field_errors"]
+
+                    for field, msgs in (row_err or {}).items():
+                        col_name = _resolve_col(field, cols)
+                        if not col_name:
+                            continue
+                        c = cols.index(col_name)
+
+                        value = df.iat[i - 1, c] if (i - 1) < len(df) else ""
+                        msgs_list = msgs if isinstance(msgs, list) else [msgs]
+                        only_extra = all("extra inputs are not permitted" in str(m).lower() for m in msgs_list)
+
+                        if only_extra:
+                            ws.write(i, c, value, fmt_yellow)
+                            kind = "Warning"
+                        else:
+                            ws.write(i, c, value, fmt_red)
+                            kind = "Error"
+
+                        text = _short(kind, field, msgs_list)
+                        ws.write_comment(i, c, text, comment_opts)
+
+                        long_text = f"{kind}: {field} — " + " | ".join(str(m) for m in msgs_list)
+                        if len(long_text) > 800:
+                            _add_prompt(ws, i, c, field, long_text)
+
+                else:
+                    by_field = _warnings_by_field(raw.get("warnings", []))
+                    for field, msgs in (by_field or {}).items():
+                        col_name = _resolve_col(field, cols)
+                        if not col_name:
+                            continue
+                        c = cols.index(col_name)
+                        value = df.iat[i - 1, c] if (i - 1) < len(df) else ""
+                        ws.write(i, c, value, fmt_yellow)
+
+                        msgs_list = msgs if isinstance(msgs, list) else [msgs]
+                        text = _short("Warning", field, msgs_list)
+                        ws.write_comment(i, c, text, comment_opts)
+
+                        if len(text) > 800:
+                            _add_prompt(ws, i, c, field, text)
+
+    buffer.seek(0)
+    return dcc.send_bytes(buffer.getvalue(), "annotated.xlsx")
+
+
 # Callback to populate validation results tabs
 @app.callback(
     Output('validation-results-container', 'children'),
@@ -531,17 +665,41 @@ def populate_validation_results_tabs(validation_results):
     if not sample_type_tabs:
         return html.Div("No invalid records found.")
 
-    tabs = html.Div([
-        dcc.Tabs(
-            id='sample-type-tabs',
-            value=sample_type_tabs[0].value if sample_type_tabs else None,
-            children=sample_type_tabs,
-            style={'border': 'none'},
-            colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"}
-        )
-    ])
+    tabs = dcc.Tabs(
+        id='sample-type-tabs',
+        value=sample_type_tabs[0].value if sample_type_tabs else None,
+        children=sample_type_tabs,
+        style={'border': 'none'},
+        colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"}
+    )
 
-    return tabs
+    header_bar = html.Div(
+        [
+            html.Div(),
+            html.Button(
+                "Download annotated template",
+                id="download-errors-btn",
+                n_clicks=0,
+                style={
+                    'backgroundColor': '#ffd740',
+                    'color': 'black',
+                    'padding': '10px 20px',
+                    'border': 'none',
+                    'borderRadius': '4px',
+                    'cursor': 'pointer',
+                    'fontSize': '16px'
+                }
+            ),
+        ],
+        style={
+            'display': 'flex',
+            'justifyContent': 'space-between',
+            'alignItems': 'center',
+            'marginBottom': '10px'
+        }
+    )
+
+    return html.Div([header_bar, tabs])
 
 
 # Callback to populate sample type content when tab is selected
