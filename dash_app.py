@@ -873,17 +873,31 @@ def _flatten_data_rows(rows, include_errors=False):
         for key, value in data_fields.items():
             if key == "Health Status" and isinstance(value, list) and value:
                 health_statuses = []
-                for status in value:
+                term_source_ids = []
+
+                # Flatten if it's a list of lists
+                flattened = []
+                for item in value:
+                    if isinstance(item, list):
+                        flattened.extend(item)
+                    else:
+                        flattened.append(item)
+
+                # Extract values
+                for status in flattened:
                     if isinstance(status, dict):
                         text = status.get("text", "")
                         term = status.get("term", "")
-                        if text and term:
-                            health_statuses.append(f"{text} ({term})")
-                        elif text:
+                        if text:
                             health_statuses.append(text)
-                        elif term:
-                            health_statuses.append(term)
-                processed_fields[key] = ", ".join(health_statuses)
+                        if term:
+                            term_source_ids.append(term)
+
+                # Store processed results
+                if health_statuses:
+                    processed_fields["Health Status"] = ", ".join(health_statuses)
+                if term_source_ids:
+                    processed_fields["Term Source ID"] = ", ".join(term_source_ids)
             elif key == "Child Of" and isinstance(value, list):
                 processed_fields[key] = ", ".join(str(item) for item in value if item)
             elif not isinstance(value, (str, int, float, bool, type(None))):
