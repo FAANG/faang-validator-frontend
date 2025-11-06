@@ -144,7 +144,8 @@ app.layout = html.Div([
                         id="loading-validation",
                         type="circle",
                         children=html.Div(id='output-data-upload')
-                    )
+                    ),
+                    html.Div(id="biosamples-form-mount")
                 ]),
 
             # Experiments Tab (empty for now)
@@ -162,6 +163,16 @@ app.layout = html.Div([
             colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"})
     ], className='container')
 ])
+
+
+@app.callback(
+    Output("biosamples-form-mount", "children"),
+    Input("stored-json-validation-results", "data")
+)
+def _mount_biosamples_form(v):
+    if not v or "results" not in v:
+        return []
+    return biosamples_form()
 
 
 # Callback to store uploaded file data and display filename
@@ -627,15 +638,11 @@ def download_annotated_xlsx(n_clicks, validation_results):
     [Input('stored-json-validation-results', 'data')]
 )
 def populate_validation_results_tabs(validation_results):
-    if validation_results is None:
-        return []
-
-    if 'results' not in validation_results:
+    if validation_results is None or 'results' not in validation_results:
         return []
 
     validation_data = validation_results['results']
     sample_types = validation_data.get('sample_types_processed', [])
-
     if not sample_types:
         return []
 
@@ -699,7 +706,7 @@ def populate_validation_results_tabs(validation_results):
         }
     )
 
-    return html.Div([header_bar, tabs])
+    return html.Div([header_bar, tabs], style={"marginTop": "8px"})
 
 
 # Callback to populate sample type content when tab is selected
@@ -1071,6 +1078,180 @@ def _df(records):
     lead = [c for c in ["Sample Name"] if c in df.columns]
     other = [c for c in df.columns if c not in lead]
     return df[lead + other]
+
+
+def _results_invalid_count(v):
+    try:
+        return int(v.get("results", {}).get("total_summary", {}).get("invalid_samples", 0))
+    except Exception:
+        return 0
+
+
+def biosamples_form():
+    return html.Div(
+        [
+            html.H3("3. Submit to BioSamples", style={"marginBottom": "10px"}),
+            html.Div(
+                id="biosamples-status-banner",
+                style={
+                    "backgroundColor": "#e8f0fe",
+                    "border": "1px solid #c6dafc",
+                    "color": "#1a73e8",
+                    "padding": "10px 12px",
+                    "borderRadius": "8px",
+                    "marginBottom": "12px",
+                    "fontWeight": 500,
+                    "display": "none",
+                }
+            ),
+            html.Label("Username", style={"fontWeight": 600}),
+            dcc.Input(
+                id="biosamples-username",
+                type="text",
+                placeholder="Username",
+                style={"width": "100%", "padding": "10px", "borderRadius": "8px",
+                       "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF", "margin": "6px 0 12px"}
+            ),
+            html.Label("Password", style={"fontWeight": 600}),
+            dcc.Input(
+                id="biosamples-password",
+                type="password",
+                placeholder="Password",
+                style={"width": "100%", "padding": "10px", "borderRadius": "8px",
+                       "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF", "margin": "6px 0 12px"}
+            ),
+            dcc.RadioItems(
+                id="biosamples-env",
+                options=[
+                    {"label": " Test server", "value": "test"},
+                    {"label": " Production server", "value": "prod"},
+                ],
+                value="test",
+                labelStyle={"marginRight": "18px"},
+                style={"marginBottom": "12px"},
+            ),
+            html.Button(
+                "Submit to BioSamples",
+                id="biosamples-submit-btn",
+                n_clicks=0,
+                style={
+                    "backgroundColor": "#673ab7",
+                    "color": "white",
+                    "padding": "10px 18px",
+                    "border": "none",
+                    "borderRadius": "8px",
+                    "cursor": "pointer",
+                    "fontSize": "16px",
+                    "width": "220px",
+                },
+            ),
+            html.Div(id="biosamples-submit-msg", style={"marginTop": "10px"}),
+        ],
+        id="biosamples-form",
+        style={"display": "none", "marginTop": "16px"},
+    )
+
+
+@app.callback(
+    [Output("biosamples-form", "style"),
+     Output("biosamples-status-banner", "children"),
+     Output("biosamples-status-banner", "style")],
+    Input("stored-json-validation-results", "data")
+)
+def _toggle_biosamples_form(v):
+    base_style = {"display": "block", "marginTop": "16px"}
+
+    if not v or "results" not in v:
+        return (
+            base_style,
+            "Please validate your file before submission.",
+            {
+                "display": "block",
+                "backgroundColor": "#e8f0fe",
+                "border": "1px solid #c6dafc",
+                "color": "#1a73e8",
+                "padding": "10px 12px",
+                "borderRadius": "8px",
+                "marginBottom": "12px",
+                "fontWeight": 500,
+            },
+        )
+
+    invalid = _results_invalid_count(v)
+    if invalid > 0:
+        return (
+            base_style,
+            f"Validation has {invalid} invalid sample(s). You can still fill in credentials, but submission is "
+            f"disabled until errors are fixed.",
+            {
+                "display": "block",
+                "backgroundColor": "#fff7e6",
+                "border": "1px solid #ffd699",
+                "color": "#8a6d3b",
+                "padding": "10px 12px",
+                "borderRadius": "8px",
+                "marginBottom": "12px",
+                "fontWeight": 500,
+            },
+        )
+    else:
+        return (
+            base_style,
+            "All samples are valid. You can submit to BioSamples.",
+            {
+                "display": "block",
+                "backgroundColor": "#e6f4ea",
+                "border": "1px solid #b7e1c5",
+                "color": "#137333",
+                "padding": "10px 12px",
+                "borderRadius": "8px",
+                "marginBottom": "12px",
+                "fontWeight": 500,
+            },
+        )
+
+
+@app.callback(
+    Output("biosamples-submit-btn", "disabled"),
+    [Input("biosamples-username", "value"),
+     Input("biosamples-password", "value"),
+     Input("stored-json-validation-results", "data")]
+)
+def _disable_submit(u, p, v):
+    if not u or not p or not v or "results" not in v:
+        return True
+
+    return _results_invalid_count(v) > 0
+
+
+@app.callback(
+    Output("biosamples-submit-msg", "children"),
+    Input("biosamples-submit-btn", "n_clicks"),
+    [State("biosamples-username", "value"),
+     State("biosamples-password", "value"),
+     State("biosamples-env", "value"),
+     State("stored-json-validation-results", "data")],
+    prevent_initial_call=True
+)
+def _submit_to_biosamples(n, username, password, env, validation_results):
+    if not n:
+        raise PreventUpdate
+
+    try:
+        payload = {
+            "credentials": {"username": username, "password": password},
+            "environment": env,
+            "validation_results": validation_results
+        }
+        url = f"{BACKEND_API_URL}/biosamples/submit"
+        r = requests.post(url, json=payload, timeout=60)
+        if r.status_code == 200:
+            msg = r.json() if r.headers.get("content-type", "").startswith("application/json") else {"detail": r.text}
+            return html.Span(f"Submitted successfully: {msg}", style={"color": "#388e3c", "fontWeight": 500})
+        else:
+            return html.Span(f"Submission failed [{r.status_code}]: {r.text}", style={"color": "#c62828", "fontWeight": 500})
+    except Exception as e:
+        return html.Span(f"Submission error: {e}", style={"color": "#c62828", "fontWeight": 500})
 
 
 app.clientside_callback(
