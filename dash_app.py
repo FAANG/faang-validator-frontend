@@ -167,11 +167,17 @@ app.layout = html.Div([
 
 @app.callback(
     Output("biosamples-form-mount", "children"),
-    Input("stored-json-validation-results", "data")
+    Input("stored-json-validation-results", "data"),
+    prevent_initial_call=True
 )
 def _mount_biosamples_form(v):
     if not v or "results" not in v:
-        return []
+        raise PreventUpdate
+
+    results = v.get("results", {})
+    if not results.get("results_by_type"):
+        raise PreventUpdate
+
     return biosamples_form()
 
 
@@ -506,7 +512,6 @@ def close_error_popup(close_clicks, overlay_clicks):
     prevent_initial_call=True
 )
 def download_annotated_xlsx(n_clicks, validation_results):
-
     if not n_clicks or not validation_results or 'results' not in validation_results:
         raise PreventUpdate
 
@@ -1080,11 +1085,40 @@ def _df(records):
     return df[lead + other]
 
 
-def _results_invalid_count(v):
+def _collect_valid_records(v):
+    out = []
     try:
-        return int(v.get("results", {}).get("total_summary", {}).get("invalid_samples", 0))
+        res = v.get("results", {}) or {}
+        by_type = res.get("results_by_type", {}) or {}
+        for sample_type, st_data in by_type.items():
+            st_key = sample_type.replace(" ", "_")
+            valid_key = f"valid_{st_key}s"
+            for rec in (st_data.get(valid_key) or []):
+                out.append({"sample_type": sample_type, **rec})
     except Exception:
-        return 0
+        pass
+    return out
+
+
+def _valid_invalid_counts(v):
+    try:
+        s = v.get("results", {}).get("total_summary", {}) or {}
+        return int(s.get("valid_samples", 0)), int(s.get("invalid_samples", 0))
+    except Exception:
+        return 0, 0
+
+
+def _valid_sample_names(v, limit=20):
+    names = []
+    for rec in _collect_valid_records(v):
+        name = rec.get("sample_name") or rec.get("Sample Name") or ""
+        if name:
+            names.append(str(name))
+    names = [n for n in names if n]
+    if len(names) > limit:
+        head = ", ".join(names[:limit])
+        return f"{head} (+{len(names) - limit} more)"
+    return ", ".join(names)
 
 
 def biosamples_form():
@@ -1163,51 +1197,33 @@ def _toggle_biosamples_form(v):
 
     if not v or "results" not in v:
         return (
-            base_style,
-            "Please validate your file before submission.",
-            {
-                "display": "block",
-                "backgroundColor": "#e8f0fe",
-                "border": "1px solid #c6dafc",
-                "color": "#1a73e8",
-                "padding": "10px 12px",
-                "borderRadius": "8px",
-                "marginBottom": "12px",
-                "fontWeight": 500,
-            },
+            {"display": "none"},
+            "",
+            {"display": "none"}
         )
 
-    invalid = _results_invalid_count(v)
-    if invalid > 0:
-        return (
-            base_style,
-            f"Validation has {invalid} invalid sample(s). You can still fill in credentials, but submission is "
-            f"disabled until errors are fixed.",
-            {
-                "display": "block",
-                "backgroundColor": "#fff7e6",
-                "border": "1px solid #ffd699",
-                "color": "#8a6d3b",
-                "padding": "10px 12px",
-                "borderRadius": "8px",
-                "marginBottom": "12px",
-                "fontWeight": 500,
-            },
-        )
+    valid_cnt, invalid_cnt = _valid_invalid_counts(v)
+    style_ok = {"display": "block", "backgroundColor": "#e6f4ea", "border": "1px solid #b7e1c5",
+                "color": "#137333", "padding": "10px 12px", "borderRadius": "8px",
+                "marginBottom": "12px", "fontWeight": 500}
+    style_warn = {"display": "block", "backgroundColor": "#fff7e6", "border": "1px solid #ffd699",
+                  "color": "#8a6d3b", "padding": "10px 12px", "borderRadius": "8px",
+                  "marginBottom": "12px", "fontWeight": 500}
+
+    if valid_cnt > 0:
+        names_str = _valid_sample_names(v, limit=20)
+        msg_children = [
+            html.Span(f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s)."),
+            html.Br(),
+            html.Span("Submission will include: "),
+            html.Span(names_str, style={"fontWeight": 600})
+        ]
+        return base_style, msg_children, style_ok
     else:
         return (
             base_style,
-            "All samples are valid. You can submit to BioSamples.",
-            {
-                "display": "block",
-                "backgroundColor": "#e6f4ea",
-                "border": "1px solid #b7e1c5",
-                "color": "#137333",
-                "padding": "10px 12px",
-                "borderRadius": "8px",
-                "marginBottom": "12px",
-                "fontWeight": 500,
-            },
+            f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s). No valid samples to submit.",
+            style_warn
         )
 
 
@@ -1220,8 +1236,17 @@ def _toggle_biosamples_form(v):
 def _disable_submit(u, p, v):
     if not u or not p or not v or "results" not in v:
         return True
+    valid_cnt, _ = _valid_invalid_counts(v)
+    return valid_cnt == 0
 
-    return _results_invalid_count(v) > 0
+
+@app.callback(
+    Output("biosamples-form-mount", "children", allow_duplicate=True),
+    Input("upload-data", "contents"),
+    prevent_initial_call=True,
+)
+def _clear_biosamples_form_on_new_upload(_):
+    return []
 
 
 @app.callback(
@@ -1238,9 +1263,16 @@ def _submit_to_biosamples(n, username, password, env, validation_results):
         raise PreventUpdate
 
     try:
+        valid_records = _collect_valid_records(validation_results)
+        if not valid_records:
+            return html.Span("No valid samples to submit.", style={"color": "#c62828", "fontWeight": 500})
+
         payload = {
             "credentials": {"username": username, "password": password},
             "environment": env,
+            "mode": "valid_only",
+            "valid_samples": valid_records,
+            "summary": dict(zip(("valid", "invalid"), _valid_invalid_counts(validation_results))),
             "validation_results": validation_results
         }
         url = f"{BACKEND_API_URL}/biosamples/submit"
@@ -1249,7 +1281,8 @@ def _submit_to_biosamples(n, username, password, env, validation_results):
             msg = r.json() if r.headers.get("content-type", "").startswith("application/json") else {"detail": r.text}
             return html.Span(f"Submitted successfully: {msg}", style={"color": "#388e3c", "fontWeight": 500})
         else:
-            return html.Span(f"Submission failed [{r.status_code}]: {r.text}", style={"color": "#c62828", "fontWeight": 500})
+            return html.Span(f"Submission failed [{r.status_code}]: {r.text}",
+                             style={"color": "#c62828", "fontWeight": 500})
     except Exception as e:
         return html.Span(f"Submission error: {e}", style={"color": "#c62828", "fontWeight": 500})
 
