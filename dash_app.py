@@ -768,27 +768,56 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict):
 
     for i, row in enumerate(invalid_rows):
         tips = {}
+
+        # normalise error structure
         row_err = row.get("errors") or {}
         if isinstance(row_err, dict) and "field_errors" in row_err:
             row_err = row_err["field_errors"]
 
+        # 🔑 build a map: logical field name -> DataTable column id
+        # e.g. "Organism" -> "Organism", "Birth Location Latitude Unit" -> "Birth Location Latitude Unit"
+        field_to_col_id = {}
+        for f in row.get("fields", []):
+            key = f.get("key")  # DataTable column id
+            title = f.get("title")  # header text
+            if key:
+                # allow matching on both key and title, case-insensitive
+                field_to_col_id[key.lower()] = key
+            if title:
+                field_to_col_id[title.lower()] = key
+
         for field, msgs in (row_err or {}).items():
-            if df_err.empty:
+            if not field:
                 continue
-            col = _resolve_col(field, df_err.columns)
-            if not col:
+
+            # Data from backend may use e.g. "Organism" / "Sex" / "Birth Location Latitude Unit"
+            col_id = field_to_col_id.get(str(field).lower())
+            if not col_id:
+                # no matching column id found for this error → skip
                 continue
 
             msgs_list = _as_list(msgs)
             is_extra = any("extra inputs are not permitted" in m.lower() for m in msgs_list)
 
             if is_extra:
-                cell_styles_err.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#fff4cc'})
-                tips[col] = {'value': f"**Warning**: {field} — " + " | ".join(msgs_list), 'type': 'markdown'}
+                cell_styles_err.append({
+                    "if": {"row_index": i, "column_id": col_id},
+                    "backgroundColor": "#fff4cc",
+                })
+                tips[col_id] = {
+                    "value": f"**Warning**: {field} — " + " | ".join(msgs_list),
+                    "type": "markdown",
+                }
             else:
-                cell_styles_err.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#ffcccc'})
-                tips[col] = {'value': f"**Error**: {field} — " + " | ".join(msgs_list), 'type': 'markdown'}
-                cols_with_real_errors.add(col)
+                cell_styles_err.append({
+                    "if": {"row_index": i, "column_id": col_id},
+                    "backgroundColor": "#ffcccc",
+                })
+                tips[col_id] = {
+                    "value": f"**Error**: {field} — " + " | ".join(msgs_list),
+                    "type": "markdown",
+                }
+                cols_with_real_errors.add(col_id)
 
         tooltip_err.append(tips)
 
@@ -796,6 +825,47 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict):
         {'if': {'column_id': c}, 'backgroundColor': '#ffd6d6'}
         for c in sorted(cols_with_real_errors)
     ]
+    table_data = []
+    columns_map = {}  # col_id -> header title
+
+    for rec in df_err.to_dict("records"):
+        row_dict = {"Sample Name": rec.get("Sample Name")}
+        for f in rec.get("fields", []):
+            col_id = f["key"]  # 👈 DataTable column id
+            title = f["title"]  # 👈 header text
+            value = f.get("value")
+            row_dict[col_id] = value
+            columns_map[col_id] = title
+        # # 🔴 errors: convert to string
+        # if "errors" in rec:
+        #     err = rec["errors"]
+        #
+        #     if isinstance(err, (dict, list)):
+        #         # pretty JSON string, or you can customise this
+        #         row_dict["errors"] = json.dumps(err)
+        #     else:
+        #         row_dict["errors"] = str(err)
+        #
+        #     columns_map.setdefault("errors", "Errors")
+        #
+        # # 🟠 warnings: also likely a list
+        # if "warnings" in rec:
+        #     warn = rec["warnings"]
+        #
+        #     if isinstance(warn, list):
+        #         row_dict["warnings"] = ", ".join(map(str, warn))
+        #     else:
+        #         row_dict["warnings"] = str(warn)
+        #
+        #     columns_map.setdefault("warnings", "Warnings")
+
+        table_data.append(row_dict)
+        columns = [{"name": "Sample Name", "id": "Sample Name"}]
+        for col_id, title in columns_map.items():
+            if col_id == "Sample Name":
+                continue
+            columns.append({"name": title, "id": col_id})
+
 
     base_cell = {"textAlign": "left", "padding": "6px", "minWidth": 120, "whiteSpace": "normal", "height": "auto"}
     zebra = [{'if': {'row_index': 'odd'}, 'backgroundColor': 'rgb(248, 248, 248)'}]
@@ -805,18 +875,20 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict):
         html.Div([
             DataTable(
                 id={"type": "result-table-error", "sample_type": sample_type, "panel_id": panel_id},
-                data=df_err.to_dict("records"),
-                columns=[{"name": c, "id": c} for c in (df_err.columns if not df_err.empty else [])],
+                data=table_data,
+                columns=columns,
                 page_size=10,
                 style_table={"overflowX": "auto"},
                 style_cell=base_cell,
                 style_header={"fontWeight": "bold"},
                 style_data_conditional=zebra + cell_styles_err + tint_whole_columns,
                 tooltip_data=tooltip_err,
-                tooltip_duration=None
+                tooltip_duration=None,
             )
-        ], id={"type": "table-container-error", "sample_type": sample_type, "panel_id": panel_id},
-            style={'display': 'block'}),
+        ],
+            id={"type": "table-container-error", "sample_type": sample_type, "panel_id": panel_id},
+            style={'display': 'block'},
+        ),
     ]
 
     warning_rows = [row for row in valid_rows if row.get('warnings')]
@@ -862,20 +934,22 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict):
 
     return html.Div(blocks)
 
-
+from collections import defaultdict
 def _flatten_data_rows(rows, include_errors=False):
     flat = []
+
     for r in rows or []:
         base = {"Sample Name": r.get("sample_name")}
         data_fields = r.get("data", {}) or {}
 
-        processed_fields = {}
-        for key, value in data_fields.items():
-            if key == "Health Status" and isinstance(value, list) and value:
-                health_statuses = []
-                term_source_ids = []
+        # ✅ list of objects, allows duplicates
+        processed_fields = []
 
-                # Flatten if it's a list of lists
+        for key, value in data_fields.items():
+            display_title = key  # default title same as key
+
+            # ---- Special handling for Health Status ----
+            if key == "Health Status" and isinstance(value, list) and value:
                 flattened = []
                 for item in value:
                     if isinstance(item, list):
@@ -883,41 +957,80 @@ def _flatten_data_rows(rows, include_errors=False):
                     else:
                         flattened.append(item)
 
-                # Extract values
                 for status in flattened:
                     if isinstance(status, dict):
-                        text = status.get("text", "")
-                        term = status.get("term", "")
+                        text = status.get("text")
+                        term = status.get("term")
                         if text:
-                            health_statuses.append(text)
+                            processed_fields.append({
+                                "key": key,
+                                "title": "Health Status",
+                                "value": text
+                            })
                         if term:
-                            term_source_ids.append(term)
+                            processed_fields.append({
+                                "key": key,
+                                "title": "Term Source ID",
+                                "value": term
+                            })
 
-                # Store processed results
-                if health_statuses:
-                    processed_fields["Health Status"] = ", ".join(health_statuses)
-                if term_source_ids:
-                    processed_fields["Term Source ID"] = ", ".join(term_source_ids)
+            # ---- Handle Term Source ID fields ----
+            elif "Term Source ID" in key:
+                processed_fields.append({
+                    "key": key,
+                    "title": "Term Source ID",
+                    "value": value
+                })
+
+            # ---- Handle Unit fields ----
+            elif "Unit" in key:
+                processed_fields.append({
+                    "key": key,
+                    "title": "Unit",
+                    "value": value
+                })
+
+            # ---- Handle Child Of fields ----
             elif key == "Child Of" and isinstance(value, list):
-                processed_fields[key] = ", ".join(str(item) for item in value if item)
+                processed_fields.append({
+                    "key": key,
+                    "title": "Child Of",
+                    "value": ", ".join(str(item) for item in value if item)
+                })
+
+            # ---- Handle complex objects ----
             elif not isinstance(value, (str, int, float, bool, type(None))):
-                processed_fields[key] = str(value) if value else ""
+                processed_fields.append({
+                    "key": key,
+                    "title": key,
+                    "value": str(value) if value else ""
+                })
+
+            # ---- Default case ----
             else:
-                processed_fields[key] = value
+                processed_fields.append({
+                    "key": key,
+                    "title": key,
+                    "value": value
+                })
 
-        base.update(processed_fields)
+        # attach processed fields list
+        base["fields"] = processed_fields
 
+        # include optional errors/warnings
         if include_errors:
             errors = r.get("errors", {})
             if isinstance(errors, dict) and "field_errors" in errors:
-                base['errors'] = errors["field_errors"]
+                base["errors"] = errors["field_errors"]
 
         warnings = r.get("warnings", [])
         if warnings:
-            base['warnings'] = warnings
+            base["warnings"] = warnings
 
         flat.append(base)
     return flat
+
+
 
 
 def _df(records):
