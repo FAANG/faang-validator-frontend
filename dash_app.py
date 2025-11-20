@@ -3,6 +3,7 @@ import base64
 import io
 import dash
 import requests
+from uuid import uuid4
 from dash import dcc, html, dash_table
 from dash.dash_table import DataTable
 from dash.dependencies import Input, Output, State, MATCH, ALL
@@ -17,12 +18,187 @@ BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 server = app.server  # Expose server variable for gunicorn
 
-# --- App Layout ---
+
+def _warnings_by_field(warnings_list):
+    import re
+    by_field = {}
+    for w in warnings_list or []:
+        m = re.search(r"Field '([^']+)'", str(w))
+        field = m.group(1) if m else None
+        by_field.setdefault(field, []).append(str(w))
+    return by_field
+
+
+def _resolve_col(field, cols):
+    if not field:
+        return None
+    for c in cols:
+        if c.lower() == field.lower():
+            return c
+    return field if field in cols else None
+
+
+def _flatten_data_rows(rows, include_errors=False):
+    flat = []
+    for r in rows or []:
+        base = {"Sample Name": r.get("sample_name")}
+        data_fields = r.get("data", {}) or {}
+
+        processed_fields = {}
+        for key, value in data_fields.items():
+            if key == "Health Status" and isinstance(value, list) and value:
+                health_statuses = []
+                for status in value:
+                    if isinstance(status, dict):
+                        text = status.get("text", "")
+                        term = status.get("term", "")
+                        if text and term:
+                            health_statuses.append(f"{text} ({term})")
+                        elif text:
+                            health_statuses.append(text)
+                        elif term:
+                            health_statuses.append(term)
+                processed_fields[key] = ", ".join(health_statuses)
+            elif key == "Child Of" and isinstance(value, list):
+                processed_fields[key] = ", ".join(str(item) for item in value if item)
+            elif not isinstance(value, (str, int, float, bool, type(None))):
+                processed_fields[key] = str(value) if value else ""
+            else:
+                processed_fields[key] = value
+
+        base.update(processed_fields)
+
+        if include_errors:
+            errors = r.get("errors", {})
+            if isinstance(errors, dict) and "field_errors" in errors:
+                base['errors'] = errors["field_errors"]
+
+        warnings = r.get("warnings", [])
+        if warnings:
+            base['warnings'] = warnings
+
+        flat.append(base)
+    return flat
+
+
+def _df(records):
+    df = pd.DataFrame(records)
+    if df.empty:
+        return df
+    lead = [c for c in ["Sample Name"] if c in df.columns]
+    other = [c for c in df.columns if c not in lead]
+    return df[lead + other]
+
+
+def _collect_valid_records(v):
+    out = []
+    try:
+        res = v.get("results", {}) or {}
+        by_type = res.get("results_by_type", {}) or {}
+        for sample_type, st_data in by_type.items():
+            st_key = sample_type.replace(" ", "_")
+            valid_key = f"valid_{st_key}s"
+            for rec in (st_data.get(valid_key) or []):
+                out.append({"sample_type": sample_type, **rec})
+    except Exception:
+        pass
+    return out
+
+
+def _valid_invalid_counts(v):
+    try:
+        s = v.get("results", {}).get("total_summary", {}) or {}
+        return int(s.get("valid_samples", 0)), int(s.get("invalid_samples", 0))
+    except Exception:
+        return 0, 0
+
+
+def _count_valid_invalid_for_type(validation_results_dict, sample_type):
+    try:
+        validation_data = validation_results_dict.get('results', {}) or {}
+        results_by_type = validation_data.get('results_by_type', {}) or {}
+        st_data = results_by_type.get(sample_type, {}) or {}
+        st_key = sample_type.replace(' ', '_')
+
+        valid_key = f"valid_{st_key}s"
+        invalid_key = f"invalid_{st_key}s"
+        if invalid_key.endswith('ss'):
+            invalid_key = invalid_key[:-1]
+
+        v = len(st_data.get(valid_key) or [])
+        iv = len(st_data.get(invalid_key) or [])
+        return v, iv
+    except Exception:
+        return 0, 0
+
+
+def biosamples_form():
+    return html.Div(
+        [
+            html.H2("Submit data to BioSamples", style={"marginBottom": "14px"}),
+
+            html.Label("Username", style={"fontWeight": 600}),
+            dcc.Input(
+                id="biosamples-username",
+                type="text",
+                placeholder="Webin username",
+                style={
+                    "width": "100%", "padding": "10px", "borderRadius": "8px",
+                    "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF",
+                    "margin": "6px 0 4px"
+                }
+            ),
+            html.Div(
+                ["Please use Webin ",
+                 html.A("service", href="https://www.ebi.ac.uk/ena/submit/webin/login", target="_blank"),
+                 " to get your credentials"
+                 ],
+                style={"color": "#64748b", "marginBottom": "12px"}
+            ),
+
+            html.Label("Password", style={"fontWeight": 600}),
+            dcc.Input(
+                id="biosamples-password",
+                type="password",
+                placeholder="Password",
+                style={
+                    "width": "100%", "padding": "10px", "borderRadius": "8px",
+                    "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF",
+                    "margin": "6px 0 16px"
+                }
+            ),
+
+            dcc.RadioItems(
+                id="biosamples-env",
+                options=[{"label": " Test server", "value": "test"},
+                         {"label": " Production server", "value": "prod"}],
+                value="test",
+                labelStyle={"marginRight": "18px"},
+                style={"marginBottom": "16px"}
+            ),
+
+            html.Div(id="biosamples-status-banner",
+                     style={"display": "none", "padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px"}),
+
+            html.Button(
+                "Submit", id="biosamples-submit-btn", n_clicks=0,
+                style={
+                    "backgroundColor": "#673ab7", "color": "white", "padding": "10px 18px",
+                    "border": "none", "borderRadius": "8px", "cursor": "pointer",
+                    "fontSize": "16px", "width": "140px"
+                }
+            ),
+            html.Div(id="biosamples-submit-msg", style={"marginTop": "10px"}),
+        ],
+        id="biosamples-form",
+        style={"display": "none", "marginTop": "16px"},
+    )
+
+
 app.layout = html.Div([
     html.Div([
         html.H1("FAANG Validation"),
         html.Div(id='dummy-output-for-reset'),
-        # Store for uploaded file data
         dcc.Store(id='stored-file-data'),
         dcc.Store(id='stored-filename'),
         dcc.Store(id='stored-all-sheets-data'),
@@ -30,47 +206,30 @@ app.layout = html.Div([
         dcc.Store(id='error-popup-data', data={'visible': False, 'column': '', 'error': ''}),
         dcc.Store(id='active-sheet', data=None),
         dcc.Store(id='stored-json-validation-results', data=None),
-
+        dcc.Store(id="submission-job-id"),
+        dcc.Store(id="submission-status"),
+        dcc.Store(id="submission-env"),
+        dcc.Store(id="submission-room-id"),
         dcc.Download(id='download-table-csv'),
-
-        # Error popup
+        dcc.Interval(id="submission-poller", interval=2000, n_intervals=0, disabled=True),
         html.Div(
             id='error-popup-container',
             style={'display': 'none'},
             children=[
-                html.Div(
-                    className='error-popup-overlay',
-                    id='error-popup-overlay'
-                ),
+                html.Div(className='error-popup-overlay', id='error-popup-overlay'),
                 html.Div(
                     className='error-popup',
                     children=[
-                        html.Div(
-                            className='error-popup-close',
-                            id='error-popup-close',
-                            children='×'
-                        ),
-                        html.H3(
-                            className='error-popup-title',
-                            id='error-popup-title',
-                            children='Error Details'
-                        ),
-                        html.Div(
-                            className='error-popup-content',
-                            id='error-popup-content',
-                            children=[]
-                        )
+                        html.Div(className='error-popup-close', id='error-popup-close', children='×'),
+                        html.H3(className='error-popup-title', id='error-popup-title', children='Error Details'),
+                        html.Div(className='error-popup-content', id='error-popup-content', children=[])
                     ]
                 )
             ]
         ),
-
-        # Tabs
         dcc.Tabs([
-            # Samples Tab
             dcc.Tab(label='Samples', style={'border': 'none'},
                     selected_style={'border': 'none', 'borderBottom': '2px solid blue'}, children=[
-                    # File Upload
                     html.Div([
                         html.Label("1. Upload template"),
                         html.Div([
@@ -86,24 +245,19 @@ app.layout = html.Div([
                                                     'border': 'none',
                                                     'borderRadius': '4px',
                                                     'cursor': 'pointer',
-                                                }
-                                                ),
+                                                }),
                                     html.Div('No file chosen', id='file-chosen-text')
                                 ], style={'display': 'flex', 'alignItems': 'center', 'gap': '10px'}),
-                                style={
-                                    'width': 'auto',
-                                    'margin': '10px 0',
-                                },
+                                style={'width': 'auto', 'margin': '10px 0'},
                                 className='upload-area',
                                 multiple=False
                             ),
-                            # Validate button container - initially hidden
                             html.Div(
                                 html.Button(
                                     'Validate',
                                     id='validate-button',
                                     className='validate-button',
-                                    disabled=True,  # Initially disabled until a file is uploaded
+                                    disabled=True,
                                     style={
                                         'backgroundColor': '#4CAF50',
                                         'color': 'white',
@@ -115,7 +269,7 @@ app.layout = html.Div([
                                     }
                                 ),
                                 id='validate-button-container',
-                                style={'display': 'none', 'marginLeft': '10px'}  # Initially hidden
+                                style={'display': 'none', 'marginLeft': '10px'}
                             ),
                             html.Div(
                                 html.Button(
@@ -137,23 +291,28 @@ app.layout = html.Div([
                                 style={'display': 'none', 'marginLeft': '10px'}
                             ),
                         ], style={'display': 'flex', 'alignItems': 'center'}),
+                        html.Div(
+                            dcc.RadioItems(
+                                id='biosamples-action',
+                                options=[
+                                    {"label": " Submit new sample", "value": "submission"},
+                                    {"label": " Update existing sample", "value": "update"},
+                                ],
+                                value="submission",
+                                labelStyle={"marginRight": "24px"},
+                                style={"marginTop": "12px"}
+                            )
+                        ),
                         html.Div(id='selected-file-display', style={'display': 'none'}),
                     ], style={'margin': '20px 0'}),
-
-                    dcc.Loading(
-                        id="loading-validation",
-                        type="circle",
-                        children=html.Div(id='output-data-upload')
-                    )
+                    dcc.Loading(id="loading-validation", type="circle", children=html.Div(id='output-data-upload')),
+                    html.Div(id="biosamples-form-mount"),
+                    html.Div(id="biosamples-results-table")
                 ]),
-
-            # Experiments Tab (empty for now)
             dcc.Tab(label='Experiments', style={'border': 'none'},
                     selected_style={'border': 'none', 'borderBottom': '2px solid blue'}, children=[
                     html.Div([], style={'margin': '20px 0'})
                 ]),
-
-            # Analysis Tab (empty for now)
             dcc.Tab(label='Analysis', style={'border': 'none'},
                     selected_style={'border': 'none', 'borderBottom': '2px solid blue'}, children=[
                     html.Div([], style={'margin': '20px 0'})
@@ -164,7 +323,6 @@ app.layout = html.Div([
 ])
 
 
-# Callback to store uploaded file data and display filename
 @app.callback(
     [Output('stored-file-data', 'data'),
      Output('stored-filename', 'data'),
@@ -247,20 +405,15 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
     json_validation_results = None
 
     try:
-        # with open('validation_results.json', 'r') as f:
-        #     response_json = json.load(f)
-
         content_type, content_string = contents.split(',')
         decoded = io.BytesIO(base64.b64decode(content_string))
 
-        # Send the file to the API
         files = {'file': (filename, decoded, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
         response = requests.post(
             'https://faang-validator-backend-service-964531885708.europe-west2.run.app/validate-file',
             files=files,
             headers={'accept': 'application/json'}
         )
-        # Handle response and parse as JSON
         if response.status_code == 200:
             response_json = response.json()
         else:
@@ -296,12 +449,8 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
 
     validation_components = [
         dcc.Store(id='stored-error-data', data=error_data),
-        dcc.Store(id='stored-validation-results', data={
-            'valid_count': valid_count,
-            'invalid_count': invalid_count,
-            'all_sheets_data': all_sheets_validation_data
-        }),
-
+        dcc.Store(id='stored-validation-results', data={'valid_count': valid_count, 'invalid_count': invalid_count,
+                                                        'all_sheets_data': all_sheets_validation_data}),
         html.H3("2. Conversion and Validation results"),
 
         html.Div([
@@ -379,115 +528,6 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
         return html.Div(validation_components + [current_children]), json_validation_results
 
 
-# Callback to show/hide error table when "Invalid organisms" button is clicked
-@app.callback(
-    [Output('error-table-container', 'children'),
-     Output('error-table-container', 'style'),
-     Output('sheet-tabs-container', 'style'),
-     Output('original-file-heading', 'style')],
-    [Input('issues-validation-button', 'n_clicks')],
-    [State('error-table-container', 'style'),
-     State('stored-error-data', 'data'),
-     State('sheet-tabs-container', 'style'),
-     State('original-file-heading', 'style')]
-)
-def toggle_error_table(n_clicks, current_style, error_data, sheet_tabs_style, heading_style):
-    if n_clicks is None or n_clicks == 0 or not error_data:
-        return [], {'display': 'none'}, sheet_tabs_style, heading_style
-
-    is_visible = current_style and current_style.get('display') == 'block'
-
-    if is_visible:
-        return [], {'display': 'none'}, sheet_tabs_style, heading_style
-    else:
-        error_table = [
-            html.H3("2. Conversion and Validation results"),
-            dash_table.DataTable(
-                id='error-table',
-                data=error_data,
-                columns=[
-                    {'name': 'Sheet', 'id': 'Sheet'},
-                    {'name': 'Sample Name', 'id': 'Sample Name'},
-                    {'name': 'Column Name', 'id': 'Column Name'},
-                    {'name': 'Error', 'id': 'Error'}
-                ],
-                page_size=10,
-                style_table={'overflowX': 'auto'},
-                style_cell={'textAlign': 'left'},
-                style_header={
-                    'backgroundColor': 'rgb(230, 230, 230)',
-                    'fontWeight': 'bold'
-                },
-                style_data_conditional=[
-                    {
-                        'if': {'row_index': 'odd'},
-                        'backgroundColor': 'rgb(248, 248, 248)'
-                    },
-                    {
-                        'if': {'column_id': 'Column Name'},
-                        'color': '#ff0000',
-                        'fontWeight': 'bold',
-                        'cursor': 'pointer',
-                        'textDecoration': 'underline'
-                    }
-                ],
-                tooltip_data=[
-                    {
-                        'Column Name': {'value': 'Click to see error details', 'type': 'markdown'}
-                    } for row in error_data
-                ],
-                tooltip_duration=None,
-                cell_selectable=True
-            )
-        ]
-
-        updated_sheet_tabs_style = {'margin': '20px 0'}
-        updated_heading_style = {'display': 'none'}
-
-        return error_table, {'display': 'block'}, updated_sheet_tabs_style, {}
-
-
-# Callback to show error popup when a cell in the "Column Name" column is clicked
-@app.callback(
-    [Output('error-popup-container', 'style'),
-     Output('error-popup-title', 'children'),
-     Output('error-popup-content', 'children')],
-    [Input('error-table', 'active_cell')],
-    [State('error-table', 'data')]
-)
-def show_error_popup(active_cell, data):
-    if active_cell is None or active_cell['column_id'] != 'Column Name':
-        return {'display': 'none'}, 'Error Details', []
-
-    row_idx = active_cell['row']
-    column_name = data[row_idx]['Column Name']
-    error_message = 'ERROR : ' + data[row_idx]['Error']
-
-    error_parts = error_message.split('; ')
-    error_elements = [html.P(error, style={'color': '#ff0000'}) for error in error_parts]
-
-    return {'display': 'block'}, f"Error in column: {column_name}", [
-        html.P(f"Sample: {data[row_idx]['Sample Name']}"),
-        html.P(f"Sheet: {data[row_idx]['Sheet']}"),
-        html.P("Error details:"),
-        html.Div(
-            error_elements,
-            style={'marginLeft': '20px'}
-        )
-    ]
-
-
-# Callback to close error popup when close button or overlay is clicked
-@app.callback(
-    Output('error-popup-container', 'style', allow_duplicate=True),
-    [Input('error-popup-close', 'n_clicks'),
-     Input('error-popup-overlay', 'n_clicks')],
-    prevent_initial_call=True
-)
-def close_error_popup(close_clicks, overlay_clicks):
-    return {'display': 'none'}
-
-
 @app.callback(
     Output('download-table-csv', 'data'),
     Input('download-errors-btn', 'n_clicks'),
@@ -495,7 +535,6 @@ def close_error_popup(close_clicks, overlay_clicks):
     prevent_initial_call=True
 )
 def download_annotated_xlsx(n_clicks, validation_results):
-
     if not n_clicks or not validation_results or 'results' not in validation_results:
         raise PreventUpdate
 
@@ -556,12 +595,9 @@ def download_annotated_xlsx(n_clicks, validation_results):
             return (f"{kind}: {field} — " + " | ".join(str(m) for m in msgs)).replace(" | ", "\n• ")
 
         def _add_prompt(ws, r, c, title, full_text):
-            ws.data_validation(r, c, r, c, {
-                "validate": "any",
-                "input_title": title[:32],
-                "input_message": full_text[:3000],
-                "show_input": True
-            })
+            ws.data_validation(r, c, r, c,
+                               {"validate": "any", "input_title": title[:32], "input_message": full_text[:3000],
+                                "show_input": True})
 
         for sheet_name, payload in excel_sheets.items():
             ws = writer.sheets[sheet_name[:31]]
@@ -621,53 +657,36 @@ def download_annotated_xlsx(n_clicks, validation_results):
     return dcc.send_bytes(buffer.getvalue(), "annotated.xlsx")
 
 
-# Callback to populate validation results tabs
 @app.callback(
     Output('validation-results-container', 'children'),
     [Input('stored-json-validation-results', 'data')]
 )
 def populate_validation_results_tabs(validation_results):
-    if validation_results is None:
-        return []
-
-    if 'results' not in validation_results:
+    if not validation_results or 'results' not in validation_results:
         return []
 
     validation_data = validation_results['results']
-    sample_types = validation_data.get('sample_types_processed', [])
-
+    sample_types = validation_data.get('sample_types_processed', []) or []
     if not sample_types:
         return []
 
     sample_type_tabs = []
     for sample_type in sample_types:
-        results_by_type = validation_data.get('results_by_type', {})
-        st_data = results_by_type.get(sample_type, {})
-        invalid_key = f"invalid_{sample_type.replace(' ', '_')}s"
-        if invalid_key.endswith('ss'):  # fix for pool of specimens
-            invalid_key = invalid_key[:-1]
-
-        invalid_records = st_data.get(invalid_key, [])
-
-        if invalid_records:
-            sample_type_tabs.append(
-                dcc.Tab(
-                    label=sample_type.capitalize(),
-                    value=sample_type,
-                    style={'border': 'none'},
-                    selected_style={'border': 'none', 'borderBottom': '2px solid blue'},
-                    children=[
-                        html.Div(id={'type': 'sample-type-content', 'index': sample_type})
-                    ]
-                )
+        v, iv = _count_valid_invalid_for_type(validation_results, sample_type)
+        label = f"{sample_type.capitalize()} ({v} valid / {iv} invalid)"
+        sample_type_tabs.append(
+            dcc.Tab(
+                label=label,
+                value=sample_type,
+                style={'border': 'none'},
+                selected_style={'border': 'none', 'borderBottom': '2px solid blue'},
+                children=[html.Div(id={'type': 'sample-type-content', 'index': sample_type})]
             )
-
-    if not sample_type_tabs:
-        return html.Div("No invalid records found.")
+        )
 
     tabs = dcc.Tabs(
         id='sample-type-tabs',
-        value=sample_type_tabs[0].value if sample_type_tabs else None,
+        value=sample_types[0] if sample_types else None,
         children=sample_type_tabs,
         style={'border': 'none'},
         colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"}
@@ -699,7 +718,7 @@ def populate_validation_results_tabs(validation_results):
         }
     )
 
-    return html.Div([header_bar, tabs])
+    return html.Div([header_bar, tabs], style={"marginTop": "8px"})
 
 
 # Callback to populate sample type content when tab is selected
@@ -719,66 +738,6 @@ def populate_sample_type_content(selected_sample_type, validation_results):
         return html.Div("No data available for this sample type.")
 
     return make_sample_type_panel(selected_sample_type, results_by_type)
-
-
-def create_samples_table(samples, is_valid=True):
-    if not samples:
-        return html.Div("No samples available.")
-
-    table_data = []
-    for sample in samples:
-        sample_data = sample.get('data', {})
-        row = {
-            'Index': sample.get('index', ''),
-            'Sample Name': sample.get('sample_name', '')
-        }
-
-        for key, value in sample_data.items():
-            if not isinstance(value, (str, int, float, bool)) and value is not None:
-                continue
-            row[key] = value
-
-        if is_valid:
-            warnings = sample.get('warnings', [])
-            row['Warnings'] = ', '.join(warnings) if warnings else 'None'
-        else:
-            errors = sample.get('errors', {}).get('errors', [])
-            row['Errors'] = ', '.join(errors) if errors else 'None'
-
-        table_data.append(row)
-
-    all_columns = set()
-    for row in table_data:
-        all_columns.update(row.keys())
-
-    ordered_columns = ['Index', 'Sample Name']
-    for col in sorted(all_columns):
-        if col not in ordered_columns:
-            ordered_columns.append(col)
-
-    table = dash_table.DataTable(
-        id='samples-table',
-        data=table_data,
-        columns=[{'name': col, 'id': col} for col in ordered_columns if any(col in row for row in table_data)],
-        page_size=10,
-        style_table={'overflowX': 'auto'},
-        style_cell={'textAlign': 'left'},
-        style_header={
-            'backgroundColor': 'rgb(230, 230, 230)',
-            'fontWeight': 'bold'
-        },
-        style_data_conditional=[
-            {
-                'if': {'row_index': 'odd'},
-                'backgroundColor': 'rgb(248, 248, 248)'
-            }
-        ]
-    )
-
-    return html.Div([
-        html.H4(f"{'Valid' if is_valid else 'Invalid'} Samples"),
-        table
-    ])
 
 
 @app.callback(
@@ -829,7 +788,6 @@ def create_sheet_tabs_ui(sheet_names, active_sheet, all_sheets_data=None):
         if sheet_name == active_sheet:
             active_tab_index = i
             break
-
     tabs = html.Div([
         html.H4("Samples", style={'textAlign': 'center', 'marginTop': '30px', 'marginBottom': '15px'}),
         dcc.Tabs(
@@ -841,56 +799,19 @@ def create_sheet_tabs_ui(sheet_names, active_sheet, all_sheets_data=None):
                     label=sheet_name,
                     value=sheet_name,
                     id={'type': 'sheet-tab', 'index': i + start_index},
-                    style={
-                        'padding': '10px 20px',
-                        'borderRadius': '4px 4px 0 0',
-                        'border': 'none',
-                    },
-                    selected_style={
-                        'backgroundColor': '#4CAF50',
-                        'color': 'white',
-                        'padding': '10px 20px',
-                        'borderRadius': '4px 4px 0 0',
-                        'fontWeight': 'bold',
-                        'boxShadow': '0 2px 5px rgba(0,0,0,0.2)',
-                        'border': 'none',
-                        'borderBottom': '2px solid blue',
-                    }
+                    style={'padding': '10px 20px', 'borderRadius': '4px 4px 0 0', 'border': 'none'},
+                    selected_style={'backgroundColor': '#4CAF50', 'color': 'white', 'padding': '10px 20px',
+                                    'borderRadius': '4px 4px 0 0', 'fontWeight': 'bold',
+                                    'boxShadow': '0 2px 5px rgba(0,0,0,0.2)', 'border': 'none',
+                                    'borderBottom': '2px solid blue'}
                 ) for i, sheet_name in enumerate(filtered_sheet_names)
             ],
-            style={
-                'width': '100%',
-                'marginBottom': '20px',
-                'border': 'none',
-            },
-            colors={
-                "border": "transparent",
-                "primary": "#4CAF50",
-                "background": "#f5f5f5"
-            }
+            style={'width': '100%', 'marginBottom': '20px', 'border': 'none'},
+            colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"}
         )
     ], style={'marginTop': '30px', 'borderTop': '1px solid #ddd', 'paddingTop': '20px'})
 
     return tabs
-
-
-def _warnings_by_field(warnings_list):
-    import re
-    by_field = {}
-    for w in warnings_list or []:
-        m = re.search(r"Field '([^']+)'", str(w))
-        field = m.group(1) if m else None
-        by_field.setdefault(field, []).append(str(w))
-    return by_field
-
-
-def _resolve_col(field, cols):
-    if not field:
-        return None
-    for c in cols:
-        if c.lower() == field.lower():
-            return c
-    return field if field in cols else None
 
 
 def make_sample_type_panel(sample_type: str, results_by_type: dict):
@@ -957,7 +878,6 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict):
 
     base_cell = {"textAlign": "left", "padding": "6px", "minWidth": 120, "whiteSpace": "normal", "height": "auto"}
     zebra = [{'if': {'row_index': 'odd'}, 'backgroundColor': 'rgb(248, 248, 248)'}]
-
     blocks = [
         html.H4("Records With Error", style={'textAlign': 'center', 'margin': '10px 0'}),
         html.Div([
@@ -998,7 +918,6 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict):
                 cell_styles_warn.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#fff4cc'})
                 tips[col] = {'value': f"**Warning**: {field} — " + " | ".join(map(str, msgs)), 'type': 'markdown'}
             tooltip_warn.append(tips)
-
         blocks += [
             html.H4("Records With Warnings", style={'textAlign': 'center', 'margin': '20px 0 10px'}),
             html.Div([
@@ -1018,59 +937,243 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict):
                 style={'display': 'block'})
         ]
 
+    if not invalid_rows and not warning_rows:
+        blocks = [
+            html.H4("No errors or warnings", style={'textAlign': 'center', 'margin': '10px 0'})
+        ]
+
     return html.Div(blocks)
 
 
-def _flatten_data_rows(rows, include_errors=False):
-    flat = []
-    for r in rows or []:
-        base = {"Sample Name": r.get("sample_name")}
-        data_fields = r.get("data", {}) or {}
+@app.callback(
+    Output("biosamples-form-mount", "children"),
+    Input("stored-json-validation-results", "data"),
+    prevent_initial_call=True
+)
+def _mount_biosamples_form(v):
+    if not v or "results" not in v:
+        raise PreventUpdate
 
-        processed_fields = {}
-        for key, value in data_fields.items():
-            if key == "Health Status" and isinstance(value, list) and value:
-                health_statuses = []
-                for status in value:
-                    if isinstance(status, dict):
-                        text = status.get("text", "")
-                        term = status.get("term", "")
-                        if text and term:
-                            health_statuses.append(f"{text} ({term})")
-                        elif text:
-                            health_statuses.append(text)
-                        elif term:
-                            health_statuses.append(term)
-                processed_fields[key] = ", ".join(health_statuses)
-            elif key == "Child Of" and isinstance(value, list):
-                processed_fields[key] = ", ".join(str(item) for item in value if item)
-            elif not isinstance(value, (str, int, float, bool, type(None))):
-                processed_fields[key] = str(value) if value else ""
+    results = v.get("results", {})
+    if not results.get("results_by_type"):
+        raise PreventUpdate
+
+    return biosamples_form()
+
+
+@app.callback(
+    [Output("biosamples-form", "style"),
+     Output("biosamples-status-banner", "children"),
+     Output("biosamples-status-banner", "style")],
+    Input("stored-json-validation-results", "data")
+)
+def _toggle_biosamples_form(v):
+    base_style = {"display": "block", "marginTop": "16px"}
+
+    if not v or "results" not in v:
+        return (
+            {"display": "none"},
+            "",
+            {"display": "none"}
+        )
+
+    valid_cnt, invalid_cnt = _valid_invalid_counts(v)
+    style_ok = {"display": "block", "backgroundColor": "#e6f4ea", "border": "1px solid #b7e1c5", "color": "#137333",
+                "padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px", "fontWeight": 500}
+    style_warn = {"display": "block", "backgroundColor": "#fff7e6", "border": "1px solid #ffd699", "color": "#8a6d3b",
+                  "padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px", "fontWeight": 500}
+    if valid_cnt > 0:
+        msg_children = [html.Span(f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s)."),
+                        html.Br()]
+        return base_style, msg_children, style_ok
+    else:
+        return base_style, (f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s). No valid samples "
+                            f"to submit."), style_warn
+
+
+@app.callback(
+    Output("biosamples-submit-btn", "disabled"),
+    [Input("biosamples-username", "value"),
+     Input("biosamples-password", "value"),
+     Input("stored-json-validation-results", "data")]
+)
+def _disable_submit(u, p, v):
+    if not v or "results" not in v:
+        return True
+    valid_cnt, _ = _valid_invalid_counts(v)
+    if valid_cnt == 0:
+        return True
+    return not (u and p)
+
+
+@app.callback(
+    [Output("submission-job-id", "data"),
+     Output("biosamples-submit-msg", "children", allow_duplicate=True),
+     Output("submission-env", "data")],
+    Input("biosamples-start-btn", "n_clicks"),
+    [State("biosamples-env", "value"),
+     State("biosamples-action", "value"),
+     State("stored-json-validation-results", "data")],
+    prevent_initial_call=True
+)
+def _start_submission(n, env, action, v):
+    if not n:
+        raise PreventUpdate
+    valid_records = _collect_valid_records(v)
+    if not valid_records:
+        return None, html.Span("No valid samples to prepare.", style={"color": "#c62828", "fontWeight": 500}), None
+    body = {"environment": env, "action": action, "valid_samples": valid_records,
+            "summary": dict(zip(("valid", "invalid"), _valid_invalid_counts(v)))}
+    try:
+        r = requests.post(f"{BACKEND_API_URL}/submission/start", json=body, timeout=60)
+        if r.ok:
+            job_id = (r.json() or {}).get("job_id")
+            msg = html.Span(f"Preparation started. Job ID: {job_id}", style={"color": "#1976d2", "fontWeight": 500})
+            return job_id, msg, env
+        else:
+            return None, html.Span(f"Start failed [{r.status_code}]: {r.text}",
+                                   style={"color": "#c62828", "fontWeight": 500}), None
+    except Exception as e:
+        return None, html.Span(f"Start error: {e}", style={"color": "#c62828", "fontWeight": 500}), None
+
+
+@app.callback(
+    [Output("biosamples-submit-msg", "children"),
+     Output("submission-job-id", "data", allow_duplicate=True),
+     Output("submission-room-id", "data", allow_duplicate=True)],
+    Input("biosamples-submit-btn", "n_clicks"),
+    [State("submission-job-id", "data"),
+     State("submission-room-id", "data"),
+     State("biosamples-username", "value"),
+     State("biosamples-password", "value"),
+     State("biosamples-env", "value"),
+     State("stored-json-validation-results", "data"),
+     State("biosamples-action", "value")],
+    prevent_initial_call=True
+)
+def _submit_to_biosamples(n, task_id, room_id, username, password, env, v, action):
+    if not n:
+        raise PreventUpdate
+
+    if not username or not password:
+        msg = html.Span("Enter username and password.", style={"color": "#c62828", "fontWeight": 500})
+        return msg, dash.no_update, dash.no_update
+
+    if not task_id or not room_id:
+        valid_records = _collect_valid_records(v)
+        if not valid_records:
+            msg = html.Span("No valid samples to prepare.", style={"color": "#c62828", "fontWeight": 500})
+            return msg, dash.no_update, dash.no_update
+
+        prep_body = {
+            "environment": env,
+            "action": action,
+            "valid_samples": valid_records,
+            "summary": dict(zip(("valid", "invalid"), _valid_invalid_counts(v)))
+        }
+        try:
+            r0 = requests.post(f"{BACKEND_API_URL}/submission/start", json=prep_body, timeout=60)
+            if r0.ok:
+                data0 = r0.json() or {}
+                task_id = data0.get("job_id") or task_id
+                room_id = data0.get("room_id") or room_id
             else:
-                processed_fields[key] = value
+                msg = html.Span(f"Start failed [{r0.status_code}]: {r0.text}",
+                                style={"color": "#c62828", "fontWeight": 500})
+                return msg, dash.no_update, dash.no_update
+        except Exception as e:
+            msg = html.Span(f"Start error: {e}", style={"color": "#c62828", "fontWeight": 500})
+            return msg, dash.no_update, dash.no_update
 
-        base.update(processed_fields)
+        if not room_id:
+            room_id = str(uuid4())
 
-        if include_errors:
-            errors = r.get("errors", {})
-            if isinstance(errors, dict) and "field_errors" in errors:
-                base['errors'] = errors["field_errors"]
+    url = f"{BACKEND_API_URL}/submission/submission/samples/{task_id}/{room_id}/submit_records"
+    body = {
+        "private_submission": False,
+        "mode": "prod" if env == "prod" else "test",
+        "username": username,
+        "password": password
+    }
 
-        warnings = r.get("warnings", [])
-        if warnings:
-            base['warnings'] = warnings
+    try:
+        r = requests.post(url, json=body, timeout=180)
+        if not r.ok:
+            msg = html.Span(f"Submission failed [{r.status_code}]: {r.text}",
+                            style={"color": "#c62828", "fontWeight": 500})
+            return msg, task_id, room_id
+        result = r.json() if r.content else {}
+        shown_id = result.get("id") or result.get("task_id") or task_id
+        msg = html.Span(f"Submission started (Task ID: {shown_id}). Tracking…",
+                        style={"color": "#388e3c", "fontWeight": 500})
+        return msg, task_id, room_id
+    except Exception as e:
+        msg = html.Span(f"Submission error: {e}", style={"color": "#c62828", "fontWeight": 500})
+        return msg, task_id, room_id
 
-        flat.append(base)
-    return flat
+
+@app.callback(
+    [Output("submission-status", "data"),
+     Output("biosamples-results-table", "children")],
+    Input("submission-poller", "n_intervals"),
+    [State("submission-job-id", "data"),
+     State("submission-env", "data"),
+     State("submission-poller", "disabled")],
+)
+def _poll_status(_tick, job_id, env, disabled):
+    if disabled or not job_id:
+        raise PreventUpdate
+    env = env or "test"
+    try:
+        r = requests.get(f"{BACKEND_API_URL}/submission/status/{job_id}", params={"mode": env}, timeout=30)
+        if not r.ok:
+            raise Exception(r.text)
+        st = r.json()
+        status = st.get("status")
+        rows = st.get("results") or []
+        if not rows:
+            table = html.Div("No results yet.") if status in ("DONE", "ERROR") else dash.no_update
+        else:
+            data = [{"Sample Name": r.get("name") or r.get("Sample Name"),
+                     "BioSample ID": r.get("biosample_accession") or r.get("BioSample ID")} for r in rows]
+            for d in data:
+                acc = d.get("BioSample ID")
+                if acc:
+                    d["BioSample ID"] = f"[{acc}](https://www.ebi.ac.uk/biosamples/samples/{acc})"
+            table = dash_table.DataTable(
+                data=data,
+                columns=[{"name": "Sample Name", "id": "Sample Name"},
+                         {"name": "BioSample ID", "id": "BioSample ID", "presentation": "markdown"}],
+                page_size=10,
+                style_table={"overflowX": "auto"},
+                style_cell={"textAlign": "left"},
+            )
+        return st, table
+    except Exception as e:
+        return {"status": "ERROR", "message": str(e)}, html.Div(f"Status error: {e}", style={"color": "#c62828"})
 
 
-def _df(records):
-    df = pd.DataFrame(records)
-    if df.empty:
-        return df
-    lead = [c for c in ["Sample Name"] if c in df.columns]
-    other = [c for c in df.columns if c not in lead]
-    return df[lead + other]
+@app.callback(
+    Output("submission-poller", "disabled"),
+    [Input("submission-job-id", "data"),
+     Input("submission-status", "data")]
+)
+def _control_poller(job_id, status):
+    if not job_id:
+        return True
+    st = (status or {}).get("status")
+    if st in (None, "PENDING", "RUNNING"):
+        return False
+    return True
+
+
+@app.callback(
+    Output("biosamples-form-mount", "children", allow_duplicate=True),
+    Input("upload-data", "contents"),
+    prevent_initial_call=True,
+)
+def _clear_biosamples_form_on_new_upload(_):
+    return []
 
 
 app.clientside_callback(
