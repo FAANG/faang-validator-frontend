@@ -3,7 +3,6 @@ import base64
 import io
 import dash
 import requests
-from uuid import uuid4
 from dash import dcc, html, dash_table
 from dash.dash_table import DataTable
 from dash.dependencies import Input, Output, State, MATCH, ALL
@@ -71,11 +70,11 @@ def _flatten_data_rows(rows, include_errors=False):
         if include_errors:
             errors = r.get("errors", {})
             if isinstance(errors, dict) and "field_errors" in errors:
-                base['errors'] = errors["field_errors"]
+                base["errors"] = errors["field_errors"]
 
         warnings = r.get("warnings", [])
         if warnings:
-            base['warnings'] = warnings
+            base["warnings"] = warnings
 
         flat.append(base)
     return flat
@@ -115,16 +114,14 @@ def _valid_invalid_counts(v):
 
 def _count_valid_invalid_for_type(validation_results_dict, sample_type):
     try:
-        validation_data = validation_results_dict.get('results', {}) or {}
-        results_by_type = validation_data.get('results_by_type', {}) or {}
+        validation_data = validation_results_dict.get("results", {}) or {}
+        results_by_type = validation_data.get("results_by_type", {}) or {}
         st_data = results_by_type.get(sample_type, {}) or {}
-        st_key = sample_type.replace(' ', '_')
-
+        st_key = sample_type.replace(" ", "_")
         valid_key = f"valid_{st_key}s"
         invalid_key = f"invalid_{st_key}s"
-        if invalid_key.endswith('ss'):
+        if invalid_key.endswith("ss"):
             invalid_key = invalid_key[:-1]
-
         v = len(st_data.get(valid_key) or [])
         iv = len(st_data.get(invalid_key) or [])
         return v, iv
@@ -136,57 +133,79 @@ def biosamples_form():
     return html.Div(
         [
             html.H2("Submit data to BioSamples", style={"marginBottom": "14px"}),
-
             html.Label("Username", style={"fontWeight": 600}),
             dcc.Input(
                 id="biosamples-username",
                 type="text",
                 placeholder="Webin username",
                 style={
-                    "width": "100%", "padding": "10px", "borderRadius": "8px",
-                    "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF",
-                    "margin": "6px 0 4px"
-                }
+                    "width": "100%",
+                    "padding": "10px",
+                    "borderRadius": "8px",
+                    "border": "1px solid #cbd5e1",
+                    "backgroundColor": "#ECF2FF",
+                    "margin": "6px 0 4px",
+                },
             ),
             html.Div(
-                ["Please use Webin ",
-                 html.A("service", href="https://www.ebi.ac.uk/ena/submit/webin/login", target="_blank"),
-                 " to get your credentials"
-                 ],
-                style={"color": "#64748b", "marginBottom": "12px"}
+                [
+                    "Please use Webin ",
+                    html.A(
+                        "service",
+                        href="https://www.ebi.ac.uk/ena/submit/webin/login",
+                        target="_blank",
+                    ),
+                    " to get your credentials",
+                ],
+                style={"color": "#64748b", "marginBottom": "12px"},
             ),
-
             html.Label("Password", style={"fontWeight": 600}),
             dcc.Input(
                 id="biosamples-password",
                 type="password",
                 placeholder="Password",
                 style={
-                    "width": "100%", "padding": "10px", "borderRadius": "8px",
-                    "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF",
-                    "margin": "6px 0 16px"
-                }
+                    "width": "100%",
+                    "padding": "10px",
+                    "borderRadius": "8px",
+                    "border": "1px solid #cbd5e1",
+                    "backgroundColor": "#ECF2FF",
+                    "margin": "6px 0 16px",
+                },
             ),
-
             dcc.RadioItems(
                 id="biosamples-env",
-                options=[{"label": " Test server", "value": "test"},
-                         {"label": " Production server", "value": "prod"}],
+                options=[
+                    {"label": " Test server", "value": "test"},
+                    {"label": " Production server", "value": "prod"},
+                ],
                 value="test",
                 labelStyle={"marginRight": "18px"},
-                style={"marginBottom": "16px"}
+                style={"marginBottom": "16px"},
             ),
-
-            html.Div(id="biosamples-status-banner",
-                     style={"display": "none", "padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px"}),
-
-            html.Button(
-                "Submit", id="biosamples-submit-btn", n_clicks=0,
+            html.Div(
+                id="biosamples-status-banner",
                 style={
-                    "backgroundColor": "#673ab7", "color": "white", "padding": "10px 18px",
-                    "border": "none", "borderRadius": "8px", "cursor": "pointer",
-                    "fontSize": "16px", "width": "140px"
-                }
+                    "display": "none",
+                    "padding": "10px 12px",
+                    "borderRadius": "8px",
+                    "marginBottom": "12px",
+                },
+            ),
+            html.Button(
+                "Submit",
+                id="biosamples-submit-btn",
+                n_clicks=0,
+                style={
+                    "backgroundColor": "#673ab7",
+                    "color": "white",
+                    "padding": "10px 18px",
+                    "border": "none",
+                    "borderRadius": "8px",
+                    "cursor": "pointer",
+                    "fontSize": "16px",
+                    "width": "140px",
+                },
             ),
             html.Div(id="biosamples-submit-msg", style={"marginTop": "10px"}),
         ],
@@ -195,203 +214,340 @@ def biosamples_form():
     )
 
 
-app.layout = html.Div([
-    html.Div([
-        html.H1("FAANG Validation"),
-        html.Div(id='dummy-output-for-reset'),
-        dcc.Store(id='stored-file-data'),
-        dcc.Store(id='stored-filename'),
-        dcc.Store(id='stored-all-sheets-data'),
-        dcc.Store(id='stored-sheet-names'),
-        dcc.Store(id='error-popup-data', data={'visible': False, 'column': '', 'error': ''}),
-        dcc.Store(id='active-sheet', data=None),
-        dcc.Store(id='stored-json-validation-results', data=None),
-        dcc.Store(id="submission-job-id"),
-        dcc.Store(id="submission-status"),
-        dcc.Store(id="submission-env"),
-        dcc.Store(id="submission-room-id"),
-        dcc.Download(id='download-table-csv'),
-        dcc.Interval(id="submission-poller", interval=2000, n_intervals=0, disabled=True),
+app.layout = html.Div(
+    [
         html.Div(
-            id='error-popup-container',
-            style={'display': 'none'},
-            children=[
-                html.Div(className='error-popup-overlay', id='error-popup-overlay'),
+            [
+                html.H1("FAANG Validation"),
+                html.Div(id="dummy-output-for-reset"),
+                dcc.Store(id="stored-file-data"),
+                dcc.Store(id="stored-filename"),
+                dcc.Store(id="stored-all-sheets-data"),
+                dcc.Store(id="stored-sheet-names"),
+                dcc.Store(
+                    id="error-popup-data",
+                    data={"visible": False, "column": "", "error": ""},
+                ),
+                dcc.Store(id="active-sheet", data=None),
+                dcc.Store(id="stored-json-validation-results", data=None),
+                dcc.Download(id="download-table-csv"),
                 html.Div(
-                    className='error-popup',
+                    id="error-popup-container",
+                    style={"display": "none"},
                     children=[
-                        html.Div(className='error-popup-close', id='error-popup-close', children='×'),
-                        html.H3(className='error-popup-title', id='error-popup-title', children='Error Details'),
-                        html.Div(className='error-popup-content', id='error-popup-content', children=[])
-                    ]
-                )
-            ]
-        ),
-        dcc.Tabs([
-            dcc.Tab(label='Samples', style={'border': 'none'},
-                    selected_style={'border': 'none', 'borderBottom': '2px solid blue'}, children=[
-                    html.Div([
-                        html.Label("1. Upload template"),
-                        html.Div([
-                            dcc.Upload(
-                                id='upload-data',
-                                children=html.Div([
-                                    html.Button('Choose File',
-                                                className='upload-button',
-                                                style={
-                                                    'backgroundColor': '#cccccc',
-                                                    'color': 'black',
-                                                    'padding': '10px 20px',
-                                                    'border': 'none',
-                                                    'borderRadius': '4px',
-                                                    'cursor': 'pointer',
-                                                }),
-                                    html.Div('No file chosen', id='file-chosen-text')
-                                ], style={'display': 'flex', 'alignItems': 'center', 'gap': '10px'}),
-                                style={'width': 'auto', 'margin': '10px 0'},
-                                className='upload-area',
-                                multiple=False
-                            ),
-                            html.Div(
-                                html.Button(
-                                    'Validate',
-                                    id='validate-button',
-                                    className='validate-button',
-                                    disabled=True,
-                                    style={
-                                        'backgroundColor': '#4CAF50',
-                                        'color': 'white',
-                                        'padding': '10px 20px',
-                                        'border': 'none',
-                                        'borderRadius': '4px',
-                                        'cursor': 'pointer',
-                                        'fontSize': '16px',
-                                    }
-                                ),
-                                id='validate-button-container',
-                                style={'display': 'none', 'marginLeft': '10px'}
-                            ),
-                            html.Div(
-                                html.Button(
-                                    'Reset',
-                                    id='reset-button',
-                                    n_clicks=0,
-                                    className='reset-button',
-                                    style={
-                                        'backgroundColor': '#f44336',
-                                        'color': 'white',
-                                        'padding': '10px 20px',
-                                        'border': 'none',
-                                        'borderRadius': '4px',
-                                        'cursor': 'pointer',
-                                        'fontSize': '16px',
-                                    }
-                                ),
-                                id='reset-button-container',
-                                style={'display': 'none', 'marginLeft': '10px'}
-                            ),
-                        ], style={'display': 'flex', 'alignItems': 'center'}),
                         html.Div(
-                            dcc.RadioItems(
-                                id='biosamples-action',
-                                options=[
-                                    {"label": " Submit new sample", "value": "submission"},
-                                    {"label": " Update existing sample", "value": "update"},
-                                ],
-                                value="submission",
-                                labelStyle={"marginRight": "24px"},
-                                style={"marginTop": "12px"}
-                            )
+                            className="error-popup-overlay", id="error-popup-overlay"
                         ),
-                        html.Div(id='selected-file-display', style={'display': 'none'}),
-                    ], style={'margin': '20px 0'}),
-                    dcc.Loading(id="loading-validation", type="circle", children=html.Div(id='output-data-upload')),
-                    html.Div(id="biosamples-form-mount"),
-                    html.Div(id="biosamples-results-table")
-                ]),
-            dcc.Tab(label='Experiments', style={'border': 'none'},
-                    selected_style={'border': 'none', 'borderBottom': '2px solid blue'}, children=[
-                    html.Div([], style={'margin': '20px 0'})
-                ]),
-            dcc.Tab(label='Analysis', style={'border': 'none'},
-                    selected_style={'border': 'none', 'borderBottom': '2px solid blue'}, children=[
-                    html.Div([], style={'margin': '20px 0'})
-                ])
-        ], style={'margin': '20px 0', 'border': 'none'},
-            colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"})
-    ], className='container')
-])
+                            html.Div(
+                                className="error-popup",
+                                children=[
+                                    html.Div(
+                                        className="error-popup-close",
+                                        id="error-popup-close",
+                                        children="×",
+                                    ),
+                                    html.H3(
+                                        className="error-popup-title",
+                                        id="error-popup-title",
+                                        children="Error Details",
+                                    ),
+                                    html.Div(
+                                        className="error-popup-content",
+                                        id="error-popup-content",
+                                        children=[],
+                                    ),
+                                ],
+                            ),
+                    ],
+                ),
+                dcc.Tabs(
+                    [
+                        dcc.Tab(
+                            label="Samples",
+                            style={"border": "none"},
+                            selected_style={
+                                "border": "none",
+                                "borderBottom": "2px solid blue",
+                            },
+                            children=[
+                                html.Div(
+                                    [
+                                        html.Label("1. Upload template"),
+                                        html.Div(
+                                            [
+                                                dcc.Upload(
+                                                    id="upload-data",
+                                                    children=html.Div(
+                                                        [
+                                                            html.Button(
+                                                                "Choose File",
+                                                                className="upload-button",
+                                                                style={
+                                                                    "backgroundColor": "#cccccc",
+                                                                    "color": "black",
+                                                                    "padding": "10px 20px",
+                                                                    "border": "none",
+                                                                    "borderRadius": "4px",
+                                                                    "cursor": "pointer",
+                                                                },
+                                                            ),
+                                                            html.Div(
+                                                                "No file chosen",
+                                                                id="file-chosen-text",
+                                                            ),
+                                                        ],
+                                                        style={
+                                                            "display": "flex",
+                                                            "alignItems": "center",
+                                                            "gap": "10px",
+                                                        },
+                                                    ),
+                                                    style={
+                                                        "width": "auto",
+                                                        "margin": "10px 0",
+                                                    },
+                                                    className="upload-area",
+                                                    multiple=False,
+                                                ),
+                                                html.Div(
+                                                    html.Button(
+                                                        "Validate",
+                                                        id="validate-button",
+                                                        className="validate-button",
+                                                        disabled=True,
+                                                        style={
+                                                            "backgroundColor": "#4CAF50",
+                                                            "color": "white",
+                                                            "padding": "10px 20px",
+                                                            "border": "none",
+                                                            "borderRadius": "4px",
+                                                            "cursor": "pointer",
+                                                            "fontSize": "16px",
+                                                        },
+                                                    ),
+                                                    id="validate-button-container",
+                                                    style={
+                                                        "display": "none",
+                                                        "marginLeft": "10px",
+                                                    },
+                                                ),
+                                                html.Div(
+                                                    html.Button(
+                                                        "Reset",
+                                                        id="reset-button",
+                                                        n_clicks=0,
+                                                        className="reset-button",
+                                                        style={
+                                                            "backgroundColor": "#f44336",
+                                                            "color": "white",
+                                                            "padding": "10px 20px",
+                                                            "border": "none",
+                                                            "borderRadius": "4px",
+                                                            "cursor": "pointer",
+                                                            "fontSize": "16px",
+                                                        },
+                                                    ),
+                                                    id="reset-button-container",
+                                                    style={
+                                                        "display": "none",
+                                                        "marginLeft": "10px",
+                                                    },
+                                                ),
+                                            ],
+                                            style={
+                                                "display": "flex",
+                                                "alignItems": "center",
+                                            },
+                                        ),
+                                        html.Div(
+                                            dcc.RadioItems(
+                                                id="biosamples-action",
+                                                options=[
+                                                    {
+                                                        "label": " Submit new sample",
+                                                        "value": "submission",
+                                                    },
+                                                    {
+                                                        "label": " Update existing sample",
+                                                        "value": "update",
+                                                    },
+                                                ],
+                                                value="submission",
+                                                labelStyle={"marginRight": "24px"},
+                                                style={"marginTop": "12px"},
+                                            )
+                                        ),
+                                        html.Div(
+                                            id="selected-file-display",
+                                            style={"display": "none"},
+                                        ),
+                                    ],
+                                    style={"margin": "20px 0"},
+                                ),
+                                dcc.Loading(
+                                    id="loading-validation",
+                                    type="circle",
+                                    children=html.Div(id="output-data-upload"),
+                                ),
+                                html.Div(id="biosamples-form-mount"),
+                                html.Div(id="biosamples-results-table"),
+                            ],
+                        ),
+                        dcc.Tab(
+                            label="Experiments",
+                            style={"border": "none"},
+                            selected_style={
+                                "border": "none",
+                                "borderBottom": "2px solid blue",
+                            },
+                            children=[
+                                html.Div([], style={"margin": "20px 0"}),
+                            ],
+                        ),
+                        dcc.Tab(
+                            label="Analysis",
+                            style={"border": "none"},
+                            selected_style={
+                                "border": "none",
+                                "borderBottom": "2px solid blue",
+                            },
+                            children=[
+                                html.Div([], style={"margin": "20px 0"}),
+                            ],
+                        ),
+                    ],
+                    style={"margin": "20px 0", "border": "none"},
+                    colors={
+                        "border": "transparent",
+                        "primary": "#4CAF50",
+                        "background": "#f5f5f5",
+                    },
+                ),
+            ],
+            className="container",
+        )
+    ]
+)
 
 
 @app.callback(
-    [Output('stored-file-data', 'data'),
-     Output('stored-filename', 'data'),
-     Output('file-chosen-text', 'children'),
-     Output('selected-file-display', 'children'),
-     Output('selected-file-display', 'style'),
-     Output('output-data-upload', 'children'),
-     Output('stored-all-sheets-data', 'data'),
-     Output('stored-sheet-names', 'data'),
-     Output('active-sheet', 'data')],
-    [Input('upload-data', 'contents')],
-    [State('upload-data', 'filename')]
+    [
+        Output("stored-file-data", "data"),
+        Output("stored-filename", "data"),
+        Output("file-chosen-text", "children"),
+        Output("selected-file-display", "children"),
+        Output("selected-file-display", "style"),
+        Output("output-data-upload", "children"),
+        Output("stored-all-sheets-data", "data"),
+        Output("stored-sheet-names", "data"),
+        Output("active-sheet", "data"),
+    ],
+    [Input("upload-data", "contents")],
+    [State("upload-data", "filename")],
 )
 def store_file_data(contents, filename):
     if contents is None:
-        return None, None, "No file chosen", [], {'display': 'none'}, [], None, None, None
+        return (
+            None,
+            None,
+            "No file chosen",
+            [],
+            {"display": "none"},
+            [],
+            None,
+            None,
+            None,
+        )
 
     try:
-        content_type, content_string = contents.split(',')
+        content_type, content_string = contents.split(",")
 
-        file_selected_display = html.Div([
-            html.H3("File Selected", id='original-file-heading'),
-            html.P(f"File: {filename}", style={'fontWeight': 'bold'}),
-            html.P("Click 'Validate' to process the file and see results."),
-        ])
+        file_selected_display = html.Div(
+            [
+                html.H3("File Selected", id="original-file-heading"),
+                html.P(f"File: {filename}", style={"fontWeight": "bold"}),
+                html.P("Click 'Validate' to process the file and see results."),
+            ]
+        )
 
-        output_data_upload_children = html.Div(id='sheet-tabs-container', style={'margin': '20px 0', 'display': 'none'})
+        output_data_upload_children = html.Div(
+            id="sheet-tabs-container",
+            style={"margin": "20px 0", "display": "none"},
+        )
 
         all_sheets_data = {}
         sheet_names = []
         active_sheet = None
 
-        return contents, filename, filename, file_selected_display, {'display': 'block', 'margin': '20px 0'}, [
-            output_data_upload_children], all_sheets_data, sheet_names, active_sheet
+        return (
+            contents,
+            filename,
+            filename,
+            file_selected_display,
+            {"display": "block", "margin": "20px 0"},
+            [output_data_upload_children],
+            all_sheets_data,
+            sheet_names,
+            active_sheet,
+        )
 
     except Exception as e:
-        error_display = html.Div([
-            html.H5(filename),
-            html.P(f"Error processing file: {str(e)}", style={'color': 'red'})
-        ])
-        return contents, filename, filename, error_display, {'display': 'block',
-                                                             'margin': '20px 0'}, [], None, None, None
+        error_display = html.Div(
+            [
+                html.H5(filename),
+                html.P(f"Error processing file: {str(e)}", style={"color": "red"}),
+            ]
+        )
+        return (
+            contents,
+            filename,
+            filename,
+            error_display,
+            {"display": "block", "margin": "20px 0"},
+            [],
+            None,
+            None,
+            None,
+        )
 
 
-# Callback to show and enable validate button when a file is uploaded
 @app.callback(
-    [Output('validate-button', 'disabled'),
-     Output('validate-button-container', 'style'),
-     Output('reset-button-container', 'style')],
-    [Input('stored-file-data', 'data')]
+    [
+        Output("validate-button", "disabled"),
+        Output("validate-button-container", "style"),
+        Output("reset-button-container", "style"),
+    ],
+    [Input("stored-file-data", "data")],
 )
 def show_and_enable_buttons(file_data):
     if file_data is None:
-        return True, {'display': 'none', 'marginLeft': '10px'}, {'display': 'none', 'marginLeft': '10px'}
+        return (
+            True,
+            {"display": "none", "marginLeft": "10px"},
+            {"display": "none", "marginLeft": "10px"},
+        )
     else:
-        return False, {'display': 'block', 'marginLeft': '10px'}, {'display': 'block', 'marginLeft': '10px'}
+        return (
+            False,
+            {"display": "block", "marginLeft": "10px"},
+            {"display": "block", "marginLeft": "10px"},
+        )
 
 
-# Callback to validate data when button is clicked
 @app.callback(
-    [Output('output-data-upload', 'children', allow_duplicate=True),
-     Output('stored-json-validation-results', 'data')],
-    [Input('validate-button', 'n_clicks')],
-    [State('stored-file-data', 'data'),
-     State('stored-filename', 'data'),
-     State('output-data-upload', 'children'),
-     State('stored-all-sheets-data', 'data'),
-     State('stored-sheet-names', 'data')],
-    prevent_initial_call=True
+    [
+        Output("output-data-upload", "children", allow_duplicate=True),
+        Output("stored-json-validation-results", "data"),
+    ],
+    [Input("validate-button", "n_clicks")],
+    [
+        State("stored-file-data", "data"),
+        State("stored-filename", "data"),
+        State("output-data-upload", "children"),
+        State("stored-all-sheets-data", "data"),
+        State("stored-sheet-names", "data"),
+    ],
+    prevent_initial_call=True,
 )
 def validate_data(n_clicks, contents, filename, current_children, all_sheets_data, sheet_names):
     if n_clicks is None or contents is None:
@@ -405,10 +561,16 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
     json_validation_results = None
 
     try:
-        content_type, content_string = contents.split(',')
+        content_type, content_string = contents.split(",")
         decoded = io.BytesIO(base64.b64decode(content_string))
 
-        files = {'file': (filename, decoded, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
+        files = {
+            "file": (
+                filename,
+                decoded,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        }
         response = requests.post(
             'https://faang-validator-backend-service-964531885708.europe-west2.run.app/validate-file',
             files=files,
@@ -419,49 +581,71 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
         else:
             raise Exception(f"Error {response.status_code}: {response.text}")
 
-        print("Using validation_results.json file for validation results")
-
-        if isinstance(response_json, dict) and 'results' in response_json:
+        if isinstance(response_json, dict) and "results" in response_json:
             json_validation_results = response_json
-            validation_results = response_json['results']
-            total_summary = validation_results.get('total_summary', {})
-            valid_count = total_summary.get('valid_samples', 0)
-            invalid_count = total_summary.get('invalid_samples', 0)
+            validation_results = response_json["results"]
+            total_summary = validation_results.get("total_summary", {})
+            valid_count = total_summary.get("valid_samples", 0)
+            invalid_count = total_summary.get("invalid_samples", 0)
         else:
             validation_data = response_json[0]
-            records = validation_data.get('validation_result', [])
-            valid_count = validation_data.get('valid_samples', 0)
-            invalid_count = validation_data.get('invalid_samples', 0)
-            error_data = validation_data.get('warnings', [])
-            all_sheets_validation_data = validation_data.get('all_sheets_data', {})
+            records = validation_data.get("validation_result", [])
+            valid_count = validation_data.get("valid_samples", 0)
+            invalid_count = validation_data.get("invalid_samples", 0)
+            error_data = validation_data.get("warnings", [])
+            all_sheets_validation_data = validation_data.get("all_sheets_data", {})
 
             if not all_sheets_validation_data and sheet_names:
                 first_sheet = sheet_names[0]
                 all_sheets_validation_data = {first_sheet: records}
 
     except Exception as e:
-        error_div = html.Div([
-            html.H5(filename),
-            html.P(f"Error connecting to backend API: {str(e)}", style={'color': 'red'})
-        ])
-        return html.Div(current_children + [error_div] if isinstance(current_children, list) else [current_children,
-                                                                                                   error_div]), None
+        error_div = html.Div(
+            [
+                html.H5(filename),
+                html.P(
+                    f"Error connecting to backend API: {str(e)}",
+                    style={"color": "red"},
+                ),
+            ]
+        )
+        return (
+            html.Div(
+                current_children + [error_div]
+                if isinstance(current_children, list)
+                else [current_children, error_div]
+            ),
+            None,
+        )
 
     validation_components = [
-        dcc.Store(id='stored-error-data', data=error_data),
-        dcc.Store(id='stored-validation-results', data={'valid_count': valid_count, 'invalid_count': invalid_count,
-                                                        'all_sheets_data': all_sheets_validation_data}),
+        dcc.Store(id="stored-error-data", data=error_data),
+        dcc.Store(
+            id="stored-validation-results",
+            data={
+                "valid_count": valid_count,
+                "invalid_count": invalid_count,
+                "all_sheets_data": all_sheets_validation_data,
+            },
+        ),
         html.H3("2. Conversion and Validation results"),
-
-        html.Div([
-            html.P("Conversion Status", style={'fontWeight': 'bold'}),
-            html.P("Success", style={'color': 'green', 'fontWeight': 'bold'}),
-            html.P("Validation Status", style={'fontWeight': 'bold'}),
-            html.P("Finished", style={'color': 'green', 'fontWeight': 'bold'}),
-        ], style={'margin': '10px 0'}),
-
-        html.Div(id='error-table-container', style={'display': 'none'}),
-        html.Div(id='validation-results-container', style={'margin': '20px 0'})
+        html.Div(
+            [
+                html.P("Conversion Status", style={"fontWeight": "bold"}),
+                html.P(
+                    "Success",
+                    style={"color": "green", "fontWeight": "bold"},
+                ),
+                html.P("Validation Status", style={"fontWeight": "bold"}),
+                html.P(
+                    "Finished",
+                    style={"color": "green", "fontWeight": "bold"},
+                ),
+            ],
+            style={"margin": "10px 0"},
+        ),
+        html.Div(id="error-table-container", style={"display": "none"}),
+        html.Div(id="validation-results-container", style={"margin": "20px 0"}),
     ]
 
     if current_children is None:
@@ -470,45 +654,51 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
         modified_children = []
 
         for child in current_children:
-            if isinstance(child, dict) and child.get('props'):
-                props = child.get('props', {})
-                children = props.get('children', [])
+            if isinstance(child, dict) and child.get("props"):
+                props = child.get("props", {})
+                children = props.get("children", [])
 
                 if isinstance(children, list) and any(
-                        isinstance(c, dict) and c.get('props', {}).get('id') == 'sheet-tabs-container'
-                        for c in children
+                    isinstance(c, dict)
+                    and c.get("props", {}).get("id") == "sheet-tabs-container"
+                    for c in children
                 ):
                     updated_child = child.copy()
                     updated_children = []
 
                     for c in children:
-                        if isinstance(c, dict) and c.get('props'):
-                            c_props = c.get('props', {})
+                        if isinstance(c, dict) and c.get("props"):
+                            c_props = c.get("props", {})
 
-                            if c_props.get('id') == 'original-file-heading':
+                            if c_props.get("id") == "original-file-heading":
                                 updated_c = c.copy()
-                                updated_c['props'] = c_props.copy()
-                                updated_c['props']['style'] = {}
+                                updated_c["props"] = c_props.copy()
+                                updated_c["props"]["style"] = {}
                                 updated_children.append(updated_c)
                                 continue
-                            elif (isinstance(c_props.get('children'), str) and
-                                  (c_props.get('children').startswith("File:") or
-                                   c_props.get('children') == "Click 'Validate' to process the file and see results.")
+                            elif isinstance(
+                                c_props.get("children"), str
+                            ) and (
+                                c_props.get("children").startswith("File:")
+                                or c_props.get("children")
+                                == "Click 'Validate' to process the file and see results."
                             ):
                                 updated_children.append(c)
                                 continue
 
-                            if isinstance(c_props.get('children'), str) and c_props.get(
-                                    'children') == "Original File Data":
+                            if (
+                                isinstance(c_props.get("children"), str)
+                                and c_props.get("children") == "Original File Data"
+                            ):
                                 updated_c = c.copy()
-                                updated_c['props'] = c_props.copy()
-                                updated_c['props']['style'] = {}
+                                updated_c["props"] = c_props.copy()
+                                updated_c["props"]["style"] = {}
                                 updated_children.append(updated_c)
 
-                            elif c_props.get('id') == 'sheet-tabs-container':
+                            elif c_props.get("id") == "sheet-tabs-container":
                                 updated_c = c.copy()
-                                updated_c['props'] = c_props.copy()
-                                updated_c['props']['style'] = {'margin': '20px 0'}
+                                updated_c["props"] = c_props.copy()
+                                updated_c["props"]["style"] = {"margin": "20px 0"}
                                 updated_children.append(updated_c)
 
                             else:
@@ -516,7 +706,7 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
                         else:
                             updated_children.append(c)
 
-                    updated_child['props']['children'] = updated_children
+                    updated_child["props"]["children"] = updated_children
                     modified_children.append(updated_child)
                 else:
                     modified_children.append(child)
@@ -529,52 +719,62 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
 
 
 @app.callback(
-    Output('download-table-csv', 'data'),
-    Input('download-errors-btn', 'n_clicks'),
-    State('stored-json-validation-results', 'data'),
-    prevent_initial_call=True
+    Output("download-table-csv", "data"),
+    Input("download-errors-btn", "n_clicks"),
+    State("stored-json-validation-results", "data"),
+    prevent_initial_call=True,
 )
 def download_annotated_xlsx(n_clicks, validation_results):
-    if not n_clicks or not validation_results or 'results' not in validation_results:
+    if not n_clicks or not validation_results or "results" not in validation_results:
         raise PreventUpdate
 
-    validation_data = validation_results['results']
-    results_by_type = validation_data.get('results_by_type', {}) or {}
-    sample_types = validation_data.get('sample_types_processed', []) or []
+    validation_data = validation_results["results"]
+    results_by_type = validation_data.get("results_by_type", {}) or {}
+    sample_types = validation_data.get("sample_types_processed", []) or []
 
     excel_sheets = {}
 
     for sample_type in sample_types:
         st_data = results_by_type.get(sample_type, {}) or {}
-        st_key = sample_type.replace(' ', '_')
+        st_key = sample_type.replace(" ", "_")
 
         invalid_key = f"invalid_{st_key}s"
-        if invalid_key.endswith('ss'):
+        if invalid_key.endswith("ss"):
             invalid_key = invalid_key[:-1]
         valid_key = f"valid_{st_key}s"
 
-        invalid_rows_full = _flatten_data_rows(st_data.get(invalid_key), include_errors=True) or []
+        invalid_rows_full = _flatten_data_rows(
+            st_data.get(invalid_key), include_errors=True
+        ) or []
         rows_for_df_err = []
         for r in invalid_rows_full:
             rc = r.copy()
-            rc.pop('errors', None)
-            rc.pop('warnings', None)
+            rc.pop("errors", None)
+            rc.pop("warnings", None)
             rows_for_df_err.append(rc)
         df_err = _df(rows_for_df_err)
 
         valid_rows_full = _flatten_data_rows(st_data.get(valid_key)) or []
-        warning_rows_full = [r for r in valid_rows_full if r.get('warnings')]
+        warning_rows_full = [r for r in valid_rows_full if r.get("warnings")]
         rows_for_df_warn = []
         for r in warning_rows_full:
             rc = r.copy()
-            rc.pop('warnings', None)
+            rc.pop("warnings", None)
             rows_for_df_warn.append(rc)
         df_warn = _df(rows_for_df_warn)
 
         if not df_err.empty:
-            excel_sheets[f"{st_key[:25]}_errors"] = {"df": df_err, "rows": invalid_rows_full, "mode": "error"}
+            excel_sheets[f"{st_key[:25]}_errors"] = {
+                "df": df_err,
+                "rows": invalid_rows_full,
+                "mode": "error",
+            }
         if not df_warn.empty:
-            excel_sheets[f"{st_key[:24]}_warnings"] = {"df": df_warn, "rows": warning_rows_full, "mode": "warn"}
+            excel_sheets[f"{st_key[:24]}_warnings"] = {
+                "df": df_warn,
+                "rows": warning_rows_full,
+                "mode": "warn",
+            }
 
     if not excel_sheets:
         raise PreventUpdate
@@ -583,7 +783,9 @@ def download_annotated_xlsx(n_clicks, validation_results):
 
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
         for sheet_name, payload in excel_sheets.items():
-            payload["df"].to_excel(writer, sheet_name=sheet_name[:31], index=False)
+            payload["df"].to_excel(
+                writer, sheet_name=sheet_name[:31], index=False
+            )
 
         book = writer.book
         fmt_red = book.add_format({"bg_color": "#FFCCCC"})
@@ -592,12 +794,23 @@ def download_annotated_xlsx(n_clicks, validation_results):
         comment_opts = {"visible": False, "x_scale": 1.5, "y_scale": 1.8}
 
         def _short(kind, field, msgs):
-            return (f"{kind}: {field} — " + " | ".join(str(m) for m in msgs)).replace(" | ", "\n• ")
+            return (
+                f"{kind}: {field} — " + " | ".join(str(m) for m in msgs)
+            ).replace(" | ", "\n• ")
 
         def _add_prompt(ws, r, c, title, full_text):
-            ws.data_validation(r, c, r, c,
-                               {"validate": "any", "input_title": title[:32], "input_message": full_text[:3000],
-                                "show_input": True})
+            ws.data_validation(
+                r,
+                c,
+                r,
+                c,
+                {
+                    "validate": "any",
+                    "input_title": title[:32],
+                    "input_message": full_text[:3000],
+                    "show_input": True,
+                },
+            )
 
         for sheet_name, payload in excel_sheets.items():
             ws = writer.sheets[sheet_name[:31]]
@@ -620,7 +833,11 @@ def download_annotated_xlsx(n_clicks, validation_results):
 
                         value = df.iat[i - 1, c] if (i - 1) < len(df) else ""
                         msgs_list = msgs if isinstance(msgs, list) else [msgs]
-                        only_extra = all("extra inputs are not permitted" in str(m).lower() for m in msgs_list)
+                        only_extra = all(
+                            "extra inputs are not permitted"
+                            in str(m).lower()
+                            for m in msgs_list
+                        )
 
                         if only_extra:
                             ws.write(i, c, value, fmt_yellow)
@@ -632,7 +849,10 @@ def download_annotated_xlsx(n_clicks, validation_results):
                         text = _short(kind, field, msgs_list)
                         ws.write_comment(i, c, text, comment_opts)
 
-                        long_text = f"{kind}: {field} — " + " | ".join(str(m) for m in msgs_list)
+                        long_text = (
+                            f"{kind}: {field} — "
+                            + " | ".join(str(m) for m in msgs_list)
+                        )
                         if len(long_text) > 800:
                             _add_prompt(ws, i, c, field, long_text)
 
@@ -658,38 +878,54 @@ def download_annotated_xlsx(n_clicks, validation_results):
 
 
 @app.callback(
-    Output('validation-results-container', 'children'),
-    [Input('stored-json-validation-results', 'data')]
+    Output("validation-results-container", "children"),
+    [Input("stored-json-validation-results", "data")],
 )
 def populate_validation_results_tabs(validation_results):
-    if not validation_results or 'results' not in validation_results:
+    if not validation_results or "results" not in validation_results:
         return []
 
-    validation_data = validation_results['results']
-    sample_types = validation_data.get('sample_types_processed', []) or []
+    validation_data = validation_results["results"]
+    sample_types = validation_data.get("sample_types_processed", []) or []
     if not sample_types:
         return []
 
     sample_type_tabs = []
     for sample_type in sample_types:
-        v, iv = _count_valid_invalid_for_type(validation_results, sample_type)
+        v, iv = _count_valid_invalid_for_type(
+            validation_results, sample_type
+        )
         label = f"{sample_type.capitalize()} ({v} valid / {iv} invalid)"
         sample_type_tabs.append(
             dcc.Tab(
                 label=label,
                 value=sample_type,
-                style={'border': 'none'},
-                selected_style={'border': 'none', 'borderBottom': '2px solid blue'},
-                children=[html.Div(id={'type': 'sample-type-content', 'index': sample_type})]
+                style={"border": "none"},
+                selected_style={
+                    "border": "none",
+                    "borderBottom": "2px solid blue",
+                },
+                children=[
+                    html.Div(
+                        id={
+                            "type": "sample-type-content",
+                            "index": sample_type,
+                        }
+                    )
+                ],
             )
         )
 
     tabs = dcc.Tabs(
-        id='sample-type-tabs',
+        id="sample-type-tabs",
         value=sample_types[0] if sample_types else None,
         children=sample_type_tabs,
-        style={'border': 'none'},
-        colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"}
+        style={"border": "none"},
+        colors={
+            "border": "transparent",
+            "primary": "#4CAF50",
+            "background": "#f5f5f5",
+        },
     )
 
     header_bar = html.Div(
@@ -700,39 +936,38 @@ def populate_validation_results_tabs(validation_results):
                 id="download-errors-btn",
                 n_clicks=0,
                 style={
-                    'backgroundColor': '#ffd740',
-                    'color': 'black',
-                    'padding': '10px 20px',
-                    'border': 'none',
-                    'borderRadius': '4px',
-                    'cursor': 'pointer',
-                    'fontSize': '16px'
-                }
+                    "backgroundColor": "#ffd740",
+                    "color": "black",
+                    "padding": "10px 20px",
+                    "border": "none",
+                    "borderRadius": "4px",
+                    "cursor": "pointer",
+                    "fontSize": "16px",
+                },
             ),
         ],
         style={
-            'display': 'flex',
-            'justifyContent': 'space-between',
-            'alignItems': 'center',
-            'marginBottom': '10px'
-        }
+            "display": "flex",
+            "justifyContent": "space-between",
+            "alignItems": "center",
+            "marginBottom": "10px",
+        },
     )
 
     return html.Div([header_bar, tabs], style={"marginTop": "8px"})
 
 
-# Callback to populate sample type content when tab is selected
 @app.callback(
-    Output({'type': 'sample-type-content', 'index': MATCH}, 'children'),
-    [Input('sample-type-tabs', 'value')],
-    [State('stored-json-validation-results', 'data')]
+    Output({"type": "sample-type-content", "index": MATCH}, "children"),
+    [Input("sample-type-tabs", "value")],
+    [State("stored-json-validation-results", "data")],
 )
 def populate_sample_type_content(selected_sample_type, validation_results):
     if validation_results is None or selected_sample_type is None:
         return []
 
-    validation_data = validation_results['results']
-    results_by_type = validation_data.get('results_by_type', {})
+    validation_data = validation_results["results"]
+    results_by_type = validation_data.get("results_by_type", {})
 
     if selected_sample_type not in results_by_type:
         return html.Div("No data available for this sample type.")
@@ -741,30 +976,37 @@ def populate_sample_type_content(selected_sample_type, validation_results):
 
 
 @app.callback(
-    Output('sheet-tabs-container', 'children'),
-    [Input('stored-sheet-names', 'data')],
-    [State('active-sheet', 'data'),
-     State('stored-all-sheets-data', 'data')]
+    Output("sheet-tabs-container", "children"),
+    [Input("stored-sheet-names", "data")],
+    [State("active-sheet", "data"), State("stored-all-sheets-data", "data")],
 )
 def create_sheet_tabs(sheet_names, active_sheet, all_sheets_data):
     return create_sheet_tabs_ui(sheet_names, active_sheet, all_sheets_data)
 
 
 @app.callback(
-    [Output('active-sheet', 'data', allow_duplicate=True),
-     Output('sheet-tabs-container', 'children', allow_duplicate=True)],
-    [Input('sheet-tabs', 'value')],
-    [State('stored-sheet-names', 'data'),
-     State('stored-all-sheets-data', 'data'),
-     State('active-sheet', 'data')],
-    prevent_initial_call=True
+    [
+        Output("active-sheet", "data", allow_duplicate=True),
+        Output("sheet-tabs-container", "children", allow_duplicate=True),
+    ],
+    [Input("sheet-tabs", "value")],
+    [
+        State("stored-sheet-names", "data"),
+        State("stored-all-sheets-data", "data"),
+        State("active-sheet", "data"),
+    ],
+    prevent_initial_call=True,
 )
-def handle_sheet_tab_click(selected_tab_value, sheet_names, all_sheets_data, current_active_sheet):
+def handle_sheet_tab_click(
+    selected_tab_value, sheet_names, all_sheets_data, current_active_sheet
+):
     if selected_tab_value is None or selected_tab_value == current_active_sheet:
         return dash.no_update, dash.no_update
 
     clicked_sheet = selected_tab_value
-    updated_tabs = create_sheet_tabs_ui(sheet_names, clicked_sheet, all_sheets_data)
+    updated_tabs = create_sheet_tabs_ui(
+        sheet_names, clicked_sheet, all_sheets_data
+    )
 
     return clicked_sheet, updated_tabs
 
@@ -780,59 +1022,95 @@ def create_sheet_tabs_ui(sheet_names, active_sheet, all_sheets_data=None):
     filtered_sheet_names = sheet_names[start_index:]
 
     if all_sheets_data:
-        filtered_sheet_names = [sheet_name for sheet_name in filtered_sheet_names
-                                if all_sheets_data.get(sheet_name, [])]
+        filtered_sheet_names = [
+            sheet_name
+            for sheet_name in filtered_sheet_names
+            if all_sheets_data.get(sheet_name, [])
+        ]
 
     active_tab_index = None
     for i, sheet_name in enumerate(filtered_sheet_names):
         if sheet_name == active_sheet:
             active_tab_index = i
             break
-    tabs = html.Div([
-        html.H4("Samples", style={'textAlign': 'center', 'marginTop': '30px', 'marginBottom': '15px'}),
-        dcc.Tabs(
-            id='sheet-tabs',
-            value=active_sheet if active_tab_index is not None else (
-                filtered_sheet_names[0] if filtered_sheet_names else None),
-            children=[
-                dcc.Tab(
-                    label=sheet_name,
-                    value=sheet_name,
-                    id={'type': 'sheet-tab', 'index': i + start_index},
-                    style={'padding': '10px 20px', 'borderRadius': '4px 4px 0 0', 'border': 'none'},
-                    selected_style={'backgroundColor': '#4CAF50', 'color': 'white', 'padding': '10px 20px',
-                                    'borderRadius': '4px 4px 0 0', 'fontWeight': 'bold',
-                                    'boxShadow': '0 2px 5px rgba(0,0,0,0.2)', 'border': 'none',
-                                    'borderBottom': '2px solid blue'}
-                ) for i, sheet_name in enumerate(filtered_sheet_names)
-            ],
-            style={'width': '100%', 'marginBottom': '20px', 'border': 'none'},
-            colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"}
-        )
-    ], style={'marginTop': '30px', 'borderTop': '1px solid #ddd', 'paddingTop': '20px'})
+    tabs = html.Div(
+        [
+            html.H4(
+                "Samples",
+                style={
+                    "textAlign": "center",
+                    "marginTop": "30px",
+                    "marginBottom": "15px",
+                },
+            ),
+            dcc.Tabs(
+                id="sheet-tabs",
+                value=active_sheet
+                if active_tab_index is not None
+                else (filtered_sheet_names[0] if filtered_sheet_names else None),
+                children=[
+                    dcc.Tab(
+                        label=sheet_name,
+                        value=sheet_name,
+                        id={"type": "sheet-tab", "index": i + start_index},
+                        style={
+                            "padding": "10px 20px",
+                            "borderRadius": "4px 4px 0 0",
+                            "border": "none",
+                        },
+                        selected_style={
+                            "backgroundColor": "#4CAF50",
+                            "color": "white",
+                            "padding": "10px 20px",
+                            "borderRadius": "4px 4px 0 0",
+                            "fontWeight": "bold",
+                            "boxShadow": "0 2px 5px rgba(0,0,0,0.2)",
+                            "border": "none",
+                            "borderBottom": "2px solid blue",
+                        },
+                    )
+                    for i, sheet_name in enumerate(filtered_sheet_names)
+                ],
+                style={
+                    "width": "100%",
+                    "marginBottom": "20px",
+                    "border": "none",
+                },
+                colors={
+                    "border": "transparent",
+                    "primary": "#4CAF50",
+                    "background": "#f5f5f5",
+                },
+            ),
+        ],
+        style={"marginTop": "30px", "borderTop": "1px solid #ddd", "paddingTop": "20px"},
+    )
 
     return tabs
 
 
 def make_sample_type_panel(sample_type: str, results_by_type: dict):
     import uuid
+
     panel_id = str(uuid.uuid4())
 
     st_data = results_by_type.get(sample_type, {}) or {}
-    st_key = sample_type.replace(' ', '_')
+    st_key = sample_type.replace(" ", "_")
     valid_key = f"valid_{st_key}s"
     invalid_key = f"invalid_{st_key}s"
-    if invalid_key.endswith('ss'):
+    if invalid_key.endswith("ss"):
         invalid_key = invalid_key[:-1]
 
-    invalid_rows = _flatten_data_rows(st_data.get(invalid_key), include_errors=True)
+    invalid_rows = _flatten_data_rows(
+        st_data.get(invalid_key), include_errors=True
+    )
     valid_rows = _flatten_data_rows(st_data.get(valid_key))
 
     rows_for_df_err = []
     for row in invalid_rows:
         rc = row.copy()
-        rc.pop('errors', None)
-        rc.pop('warnings', None)
+        rc.pop("errors", None)
+        rc.pop("warnings", None)
         rows_for_df_err.append(rc)
     df_err = _df(rows_for_df_err)
 
@@ -859,87 +1137,169 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict):
                 continue
 
             msgs_list = _as_list(msgs)
-            is_extra = any("extra inputs are not permitted" in m.lower() for m in msgs_list)
+            is_extra = any(
+                "extra inputs are not permitted" in m.lower()
+                for m in msgs_list
+            )
 
             if is_extra:
-                cell_styles_err.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#fff4cc'})
-                tips[col] = {'value': f"**Warning**: {field} — " + " | ".join(msgs_list), 'type': 'markdown'}
+                cell_styles_err.append(
+                    {
+                        "if": {"row_index": i, "column_id": col},
+                        "backgroundColor": "#fff4cc",
+                    }
+                )
+                tips[col] = {
+                    "value": f"**Warning**: {field} — "
+                    + " | ".join(msgs_list),
+                    "type": "markdown",
+                }
             else:
-                cell_styles_err.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#ffcccc'})
-                tips[col] = {'value': f"**Error**: {field} — " + " | ".join(msgs_list), 'type': 'markdown'}
+                cell_styles_err.append(
+                    {
+                        "if": {"row_index": i, "column_id": col},
+                        "backgroundColor": "#ffcccc",
+                    }
+                )
+                tips[col] = {
+                    "value": f"**Error**: {field} — "
+                    + " | ".join(msgs_list),
+                    "type": "markdown",
+                }
                 cols_with_real_errors.add(col)
 
         tooltip_err.append(tips)
 
     tint_whole_columns = [
-        {'if': {'column_id': c}, 'backgroundColor': '#ffd6d6'}
+        {
+            "if": {"column_id": c},
+            "backgroundColor": "#ffd6d6",
+        }
         for c in sorted(cols_with_real_errors)
     ]
 
-    base_cell = {"textAlign": "left", "padding": "6px", "minWidth": 120, "whiteSpace": "normal", "height": "auto"}
-    zebra = [{'if': {'row_index': 'odd'}, 'backgroundColor': 'rgb(248, 248, 248)'}]
+    base_cell = {
+        "textAlign": "left",
+        "padding": "6px",
+        "minWidth": 120,
+        "whiteSpace": "normal",
+        "height": "auto",
+    }
+    zebra = [
+        {
+            "if": {"row_index": "odd"},
+            "backgroundColor": "rgb(248, 248, 248)",
+        }
+    ]
     blocks = [
-        html.H4("Records With Error", style={'textAlign': 'center', 'margin': '10px 0'}),
-        html.Div([
-            DataTable(
-                id={"type": "result-table-error", "sample_type": sample_type, "panel_id": panel_id},
-                data=df_err.to_dict("records"),
-                columns=[{"name": c, "id": c} for c in (df_err.columns if not df_err.empty else [])],
-                page_size=10,
-                style_table={"overflowX": "auto"},
-                style_cell=base_cell,
-                style_header={"fontWeight": "bold"},
-                style_data_conditional=zebra + cell_styles_err + tint_whole_columns,
-                tooltip_data=tooltip_err,
-                tooltip_duration=None
-            )
-        ], id={"type": "table-container-error", "sample_type": sample_type, "panel_id": panel_id},
-            style={'display': 'block'}),
+        html.H4(
+            "Records With Error",
+            style={"textAlign": "center", "margin": "10px 0"},
+        ),
+        html.Div(
+            [
+                DataTable(
+                    id={
+                        "type": "result-table-error",
+                        "sample_type": sample_type,
+                        "panel_id": panel_id,
+                    },
+                    data=df_err.to_dict("records"),
+                    columns=[
+                        {"name": c, "id": c}
+                        for c in (df_err.columns if not df_err.empty else [])
+                    ],
+                    page_size=10,
+                    style_table={"overflowX": "auto"},
+                    style_cell=base_cell,
+                    style_header={"fontWeight": "bold"},
+                    style_data_conditional=zebra
+                    + cell_styles_err
+                    + tint_whole_columns,
+                    tooltip_data=tooltip_err,
+                    tooltip_duration=None,
+                )
+            ],
+            id={
+                "type": "table-container-error",
+                "sample_type": sample_type,
+                "panel_id": panel_id,
+            },
+            style={"display": "block"},
+        ),
     ]
 
-    warning_rows = [row for row in valid_rows if row.get('warnings')]
+    warning_rows = [row for row in valid_rows if row.get("warnings")]
     if warning_rows:
         rows_for_df_warn = []
         for row in warning_rows:
             rc = row.copy()
-            rc.pop('warnings', None)
+            rc.pop("warnings", None)
             rows_for_df_warn.append(rc)
         df_warn = _df(rows_for_df_warn)
 
         cell_styles_warn = []
         tooltip_warn = []
         for i, row in enumerate(warning_rows):
-            by_field = _warnings_by_field(row.get('warnings', []))
+            by_field = _warnings_by_field(row.get("warnings", []))
             tips = {}
             for field, msgs in (by_field or {}).items():
                 col = _resolve_col(field, df_warn.columns)
                 if not col:
                     continue
-                cell_styles_warn.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#fff4cc'})
-                tips[col] = {'value': f"**Warning**: {field} — " + " | ".join(map(str, msgs)), 'type': 'markdown'}
+                cell_styles_warn.append(
+                    {
+                        "if": {"row_index": i, "column_id": col},
+                        "backgroundColor": "#fff4cc",
+                    }
+                )
+                tips[col] = {
+                    "value": f"**Warning**: {field} — "
+                    + " | ".join(map(str, msgs)),
+                    "type": "markdown",
+                }
             tooltip_warn.append(tips)
         blocks += [
-            html.H4("Records With Warnings", style={'textAlign': 'center', 'margin': '20px 0 10px'}),
-            html.Div([
-                DataTable(
-                    id={"type": "result-table-warning", "sample_type": sample_type, "panel_id": panel_id},
-                    data=df_warn.to_dict("records"),
-                    columns=[{"name": c, "id": c} for c in df_warn.columns],
-                    page_size=10,
-                    style_table={"overflowX": "auto"},
-                    style_cell=base_cell,
-                    style_header={"fontWeight": "bold"},
-                    style_data_conditional=zebra + cell_styles_warn,
-                    tooltip_data=tooltip_warn,
-                    tooltip_duration=None
-                )
-            ], id={"type": "table-container-warning", "sample_type": sample_type, "panel_id": panel_id},
-                style={'display': 'block'})
+            html.H4(
+                "Records With Warnings",
+                style={"textAlign": "center", "margin": "20px 0 10px"},
+            ),
+            html.Div(
+                [
+                    DataTable(
+                        id={
+                            "type": "result-table-warning",
+                            "sample_type": sample_type,
+                            "panel_id": panel_id,
+                        },
+                        data=df_warn.to_dict("records"),
+                        columns=[
+                            {"name": c, "id": c} for c in df_warn.columns
+                        ],
+                        page_size=10,
+                        style_table={"overflowX": "auto"},
+                        style_cell=base_cell,
+                        style_header={"fontWeight": "bold"},
+                        style_data_conditional=zebra + cell_styles_warn,
+                        tooltip_data=tooltip_warn,
+                        tooltip_duration=None,
+                    )
+                ],
+                id={
+                    "type": "table-container-warning",
+                    "sample_type": sample_type,
+                    "panel_id": panel_id,
+                },
+                style={"display": "block"},
+            ),
         ]
 
     if not invalid_rows and not warning_rows:
         blocks = [
-            html.H4("No errors or warnings", style={'textAlign': 'center', 'margin': '10px 0'})
+            html.H4(
+                "No errors or warnings",
+                style={"textAlign": "center", "margin": "10px 0"},
+            )
         ]
 
     return html.Div(blocks)
@@ -948,7 +1308,7 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict):
 @app.callback(
     Output("biosamples-form-mount", "children"),
     Input("stored-json-validation-results", "data"),
-    prevent_initial_call=True
+    prevent_initial_call=True,
 )
 def _mount_biosamples_form(v):
     if not v or "results" not in v:
@@ -962,40 +1322,63 @@ def _mount_biosamples_form(v):
 
 
 @app.callback(
-    [Output("biosamples-form", "style"),
-     Output("biosamples-status-banner", "children"),
-     Output("biosamples-status-banner", "style")],
-    Input("stored-json-validation-results", "data")
+    [
+        Output("biosamples-form", "style"),
+        Output("biosamples-status-banner", "children"),
+        Output("biosamples-status-banner", "style"),
+    ],
+    Input("stored-json-validation-results", "data"),
 )
 def _toggle_biosamples_form(v):
     base_style = {"display": "block", "marginTop": "16px"}
 
     if not v or "results" not in v:
-        return (
-            {"display": "none"},
-            "",
-            {"display": "none"}
-        )
+        return ({"display": "none"}, "", {"display": "none"})
 
     valid_cnt, invalid_cnt = _valid_invalid_counts(v)
-    style_ok = {"display": "block", "backgroundColor": "#e6f4ea", "border": "1px solid #b7e1c5", "color": "#137333",
-                "padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px", "fontWeight": 500}
-    style_warn = {"display": "block", "backgroundColor": "#fff7e6", "border": "1px solid #ffd699", "color": "#8a6d3b",
-                  "padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px", "fontWeight": 500}
+    style_ok = {
+        "display": "block",
+        "backgroundColor": "#e6f4ea",
+        "border": "1px solid #b7e1c5",
+        "color": "#137333",
+        "padding": "10px 12px",
+        "borderRadius": "8px",
+        "marginBottom": "12px",
+        "fontWeight": 500,
+    }
+    style_warn = {
+        "display": "block",
+        "backgroundColor": "#fff7e6",
+        "border": "1px solid #ffd699",
+        "color": "#8a6d3b",
+        "padding": "10px 12px",
+        "borderRadius": "8px",
+        "marginBottom": "12px",
+        "fontWeight": 500,
+    }
     if valid_cnt > 0:
-        msg_children = [html.Span(f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s)."),
-                        html.Br()]
+        msg_children = [
+            html.Span(
+                f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s)."
+            ),
+            html.Br(),
+        ]
         return base_style, msg_children, style_ok
     else:
-        return base_style, (f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s). No valid samples "
-                            f"to submit."), style_warn
+        return (
+            base_style,
+            f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s). No valid samples to submit.",
+            style_warn,
+        )
 
 
 @app.callback(
     Output("biosamples-submit-btn", "disabled"),
-    [Input("biosamples-username", "value"),
-     Input("biosamples-password", "value"),
-     Input("stored-json-validation-results", "data")]
+    [
+        Input("biosamples-username", "value"),
+        Input("biosamples-password", "value"),
+        Input("stored-json-validation-results", "data"),
+    ],
 )
 def _disable_submit(u, p, v):
     if not v or "results" not in v:
@@ -1007,164 +1390,133 @@ def _disable_submit(u, p, v):
 
 
 @app.callback(
-    [Output("submission-job-id", "data"),
-     Output("biosamples-submit-msg", "children", allow_duplicate=True),
-     Output("submission-env", "data")],
-    Input("biosamples-start-btn", "n_clicks"),
-    [State("biosamples-env", "value"),
-     State("biosamples-action", "value"),
-     State("stored-json-validation-results", "data")],
-    prevent_initial_call=True
-)
-def _start_submission(n, env, action, v):
-    if not n:
-        raise PreventUpdate
-    valid_records = _collect_valid_records(v)
-    if not valid_records:
-        return None, html.Span("No valid samples to prepare.", style={"color": "#c62828", "fontWeight": 500}), None
-    body = {"environment": env, "action": action, "valid_samples": valid_records,
-            "summary": dict(zip(("valid", "invalid"), _valid_invalid_counts(v)))}
-    try:
-        r = requests.post(f"{BACKEND_API_URL}/submission/start", json=body, timeout=60)
-        if r.ok:
-            job_id = (r.json() or {}).get("job_id")
-            msg = html.Span(f"Preparation started. Job ID: {job_id}", style={"color": "#1976d2", "fontWeight": 500})
-            return job_id, msg, env
-        else:
-            return None, html.Span(f"Start failed [{r.status_code}]: {r.text}",
-                                   style={"color": "#c62828", "fontWeight": 500}), None
-    except Exception as e:
-        return None, html.Span(f"Start error: {e}", style={"color": "#c62828", "fontWeight": 500}), None
-
-
-@app.callback(
-    [Output("biosamples-submit-msg", "children"),
-     Output("submission-job-id", "data", allow_duplicate=True),
-     Output("submission-room-id", "data", allow_duplicate=True)],
+    [
+        Output("biosamples-submit-msg", "children"),
+        Output("biosamples-results-table", "children"),
+    ],
     Input("biosamples-submit-btn", "n_clicks"),
-    [State("submission-job-id", "data"),
-     State("submission-room-id", "data"),
-     State("biosamples-username", "value"),
-     State("biosamples-password", "value"),
-     State("biosamples-env", "value"),
-     State("stored-json-validation-results", "data"),
-     State("biosamples-action", "value")],
-    prevent_initial_call=True
+    State("biosamples-username", "value"),
+    State("biosamples-password", "value"),
+    State("biosamples-env", "value"),
+    State("biosamples-action", "value"),
+    State("stored-json-validation-results", "data"),
+    prevent_initial_call=True,
 )
-def _submit_to_biosamples(n, task_id, room_id, username, password, env, v, action):
+def _submit_to_biosamples(n, username, password, env, action, v):
     if not n:
         raise PreventUpdate
+
+    if not v or "results" not in v:
+        msg = html.Span(
+            "No validation results available. Please validate your file first.",
+            style={"color": "#c62828", "fontWeight": 500},
+        )
+        return msg, dash.no_update
+
+    valid_cnt, invalid_cnt = _valid_invalid_counts(v)
+    if valid_cnt == 0:
+        msg = html.Span(
+            "No valid samples to submit. Please fix errors and re-validate.",
+            style={"color": "#c62828", "fontWeight": 500},
+        )
+        return msg, dash.no_update
 
     if not username or not password:
-        msg = html.Span("Enter username and password.", style={"color": "#c62828", "fontWeight": 500})
-        return msg, dash.no_update, dash.no_update
+        msg = html.Span(
+            "Please enter Webin username and password.",
+            style={"color": "#c62828", "fontWeight": 500},
+        )
+        return msg, dash.no_update
 
-    if not task_id or not room_id:
-        valid_records = _collect_valid_records(v)
-        if not valid_records:
-            msg = html.Span("No valid samples to prepare.", style={"color": "#c62828", "fontWeight": 500})
-            return msg, dash.no_update, dash.no_update
+    validation_results = v["results"]
 
-        prep_body = {
-            "environment": env,
-            "action": action,
-            "valid_samples": valid_records,
-            "summary": dict(zip(("valid", "invalid"), _valid_invalid_counts(v)))
-        }
-        try:
-            r0 = requests.post(f"{BACKEND_API_URL}/submission/start", json=prep_body, timeout=60)
-            if r0.ok:
-                data0 = r0.json() or {}
-                task_id = data0.get("job_id") or task_id
-                room_id = data0.get("room_id") or room_id
-            else:
-                msg = html.Span(f"Start failed [{r0.status_code}]: {r0.text}",
-                                style={"color": "#c62828", "fontWeight": 500})
-                return msg, dash.no_update, dash.no_update
-        except Exception as e:
-            msg = html.Span(f"Start error: {e}", style={"color": "#c62828", "fontWeight": 500})
-            return msg, dash.no_update, dash.no_update
-
-        if not room_id:
-            room_id = str(uuid4())
-
-    url = f"{BACKEND_API_URL}/submission/submission/samples/{task_id}/{room_id}/submit_records"
     body = {
-        "private_submission": False,
-        "mode": "prod" if env == "prod" else "test",
-        "username": username,
-        "password": password
+        "validation_results": validation_results,
+        "webin_username": username,
+        "webin_password": password,
+        "mode": env,
+        "update_existing": action == "update",
     }
 
     try:
-        r = requests.post(url, json=body, timeout=180)
-        if not r.ok:
-            msg = html.Span(f"Submission failed [{r.status_code}]: {r.text}",
-                            style={"color": "#c62828", "fontWeight": 500})
-            return msg, task_id, room_id
-        result = r.json() if r.content else {}
-        shown_id = result.get("id") or result.get("task_id") or task_id
-        msg = html.Span(f"Submission started (Task ID: {shown_id}). Tracking…",
-                        style={"color": "#388e3c", "fontWeight": 500})
-        return msg, task_id, room_id
-    except Exception as e:
-        msg = html.Span(f"Submission error: {e}", style={"color": "#c62828", "fontWeight": 500})
-        return msg, task_id, room_id
+        url = f"{BACKEND_API_URL}/submit-to-biosamples"
+        r = requests.post(url, json=body, timeout=600)
 
-
-@app.callback(
-    [Output("submission-status", "data"),
-     Output("biosamples-results-table", "children")],
-    Input("submission-poller", "n_intervals"),
-    [State("submission-job-id", "data"),
-     State("submission-env", "data"),
-     State("submission-poller", "disabled")],
-)
-def _poll_status(_tick, job_id, env, disabled):
-    if disabled or not job_id:
-        raise PreventUpdate
-    env = env or "test"
-    try:
-        r = requests.get(f"{BACKEND_API_URL}/submission/status/{job_id}", params={"mode": env}, timeout=30)
         if not r.ok:
-            raise Exception(r.text)
-        st = r.json()
-        status = st.get("status")
-        rows = st.get("results") or []
-        if not rows:
-            table = html.Div("No results yet.") if status in ("DONE", "ERROR") else dash.no_update
-        else:
-            data = [{"Sample Name": r.get("name") or r.get("Sample Name"),
-                     "BioSample ID": r.get("biosample_accession") or r.get("BioSample ID")} for r in rows]
-            for d in data:
-                acc = d.get("BioSample ID")
+            msg = html.Span(
+                f"Submission failed [{r.status_code}]: {r.text}",
+                style={"color": "#c62828", "fontWeight": 500},
+            )
+            return msg, dash.no_update
+
+        data = r.json() if r.content else {}
+
+        success = data.get("success", False)
+        message = data.get("message", "No message from server")
+        submitted_count = data.get("submitted_count")
+        errors = data.get("errors") or []
+        biosamples_ids = data.get("biosamples_ids") or {}
+
+        color = "#388e3c" if success else "#c62828"
+
+        msg_children = [html.Span(message, style={"fontWeight": 500})]
+        if submitted_count is not None:
+            msg_children += [
+                html.Br(),
+                html.Span(f"Submitted samples: {submitted_count}"),
+            ]
+        if errors:
+            msg_children += [
+                html.Br(),
+                html.Ul(
+                    [html.Li(e) for e in errors],
+                    style={"marginTop": "6px", "color": "#c62828"},
+                ),
+            ]
+
+        msg = html.Div(msg_children, style={"color": color})
+
+        if biosamples_ids:
+            table_data = [
+                {"Sample Name": name, "BioSample ID": acc}
+                for name, acc in biosamples_ids.items()
+            ]
+
+            for row in table_data:
+                acc = row.get("BioSample ID")
                 if acc:
-                    d["BioSample ID"] = f"[{acc}](https://www.ebi.ac.uk/biosamples/samples/{acc})"
+                    row[
+                        "BioSample ID"
+                    ] = f"[{acc}](https://www.ebi.ac.uk/biosamples/samples/{acc})"
+
             table = dash_table.DataTable(
-                data=data,
-                columns=[{"name": "Sample Name", "id": "Sample Name"},
-                         {"name": "BioSample ID", "id": "BioSample ID", "presentation": "markdown"}],
+                data=table_data,
+                columns=[
+                    {"name": "Sample Name", "id": "Sample Name"},
+                    {
+                        "name": "BioSample ID",
+                        "id": "BioSample ID",
+                        "presentation": "markdown",
+                    },
+                ],
                 page_size=10,
                 style_table={"overflowX": "auto"},
                 style_cell={"textAlign": "left"},
             )
-        return st, table
+        else:
+            table = html.Div(
+                "No BioSample accessions returned.",
+                style={"marginTop": "8px", "color": "#555"},
+            )
+
+        return msg, table
+
     except Exception as e:
-        return {"status": "ERROR", "message": str(e)}, html.Div(f"Status error: {e}", style={"color": "#c62828"})
-
-
-@app.callback(
-    Output("submission-poller", "disabled"),
-    [Input("submission-job-id", "data"),
-     Input("submission-status", "data")]
-)
-def _control_poller(job_id, status):
-    if not job_id:
-        return True
-    st = (status or {}).get("status")
-    if st in (None, "PENDING", "RUNNING"):
-        return False
-    return True
+        msg = html.Span(
+            f"Submission error: {e}",
+            style={"color": "#c62828", "fontWeight": 500},
+        )
+        return msg, dash.no_update
 
 
 @app.callback(
@@ -1185,12 +1537,13 @@ app.clientside_callback(
         return '';
     }
     """,
-    Output('dummy-output-for-reset', 'children'),
-    [Input('reset-button', 'n_clicks')],
-    prevent_initial_call=True
+    Output("dummy-output-for-reset", "children"),
+    [Input("reset-button", "n_clicks")],
+    prevent_initial_call=True,
 )
 
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8050))
-    debug = os.environ.get('ENVIRONMENT', 'development') != 'production'
-    app.run(host='0.0.0.0', port=port, debug=debug)
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8050))
+    debug = os.environ.get("ENVIRONMENT", "development") != "production"
+    app.run(host="0.0.0.0", port=port, debug=debug)
