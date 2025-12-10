@@ -2,6 +2,7 @@ import json
 import os
 import base64
 import io
+import re
 import dash
 import requests
 from dash import dcc, html, dash_table
@@ -644,21 +645,24 @@ def build_invalid_table_from_json(invalid_records):
         row_dict["Sample Name"] = rec.get("sample_name", "")
         for key, value in data.items():
             # Health Status is a list of dicts like {"text":..., "term":...}
+            # Create separate columns for each value (use numbered IDs, but same display name)
             if key == "Health Status" and isinstance(value, list):
-                texts = []
-                terms = []
-                for item in value:
+                for idx, item in enumerate(value, start=1):
                     if isinstance(item, dict):
                         if item.get("text"):
-                            texts.append(item["text"])
+                            # Use numbered ID for uniqueness, but display name stays "Health Status"
+                            col_id = f"Health Status_{idx}" if len(value) > 1 else "Health Status"
+                            row_dict[col_id] = item["text"]
                         if item.get("term"):
-                            terms.append(item["term"])
-                if texts:
-                    row_dict["Health Status"] = ", ".join(texts)
-                if terms:
-                    row_dict["Health Status Term Source ID"] = ", ".join(terms)
+                            col_id = f"Health Status Term Source ID_{idx}" if len(value) > 1 else "Health Status Term Source ID"
+                            row_dict[col_id] = item["term"]
+            elif key == "Child Of" and isinstance(value, list):
+                # Create separate columns for each Child Of value (use numbered IDs, but same display name)
+                for idx, item in enumerate(value, start=1):
+                    col_id = f"Child Of_{idx}" if len(value) > 1 else "Child Of"
+                    row_dict[col_id] = str(item) if item else ""
             else:
-                # Child Of, Derived From may be lists of strings
+                # Other list fields - keep as comma-separated for now
                 if isinstance(value, list):
                     row_dict[key] = ", ".join(map(str, value))
                 else:
@@ -1202,7 +1206,6 @@ def create_sheet_tabs_ui(sheet_names, active_sheet, all_sheets_data=None):
 
 
 def _warnings_by_field(warnings_list):
-    import re
     by_field = {}
     for w in warnings_list or []:
         m = re.search(r"Field '([^']+)'", str(w))
@@ -1262,7 +1265,7 @@ def make_sample_type_panel(sample_type: str,
                     seen.add(k)
                     all_cols.append(k)
 
-        columns = [{"name": _normalize_header(c), "id": c} for c in all_cols]
+        columns = [{"name": _get_column_display_name(c), "id": c} for c in all_cols]
     else:
         columns = []
 
@@ -1324,7 +1327,7 @@ def make_sample_type_panel(sample_type: str,
                     DataTable(
                         id={"type": "result-table-warning", "sample_type": sample_type, "panel_id": panel_id},
                         data=df_warn.to_dict("records"),
-                        columns=[{"name": c, "id": c} for c in df_warn.columns],
+                        columns=[{"name": _get_column_display_name(c), "id": c} for c in df_warn.columns],
                         page_size=10,
                         style_table={"overflowX": "auto"},
                         style_cell=base_cell,
@@ -1358,28 +1361,24 @@ def _flatten_data_rows(rows, include_errors=False):
             display_title = _normalize_header(key)  # default title same as key
 
             # ---- Special handling for Health Status ----
+            # Create separate columns for each Health Status entry (use numbered IDs, but same display name)
             if key == "Health Status" and isinstance(value, list) and value:
-                flattened = []
-                for item in value:
-                    if isinstance(item, list):
-                        flattened.extend(item)
-                    else:
-                        flattened.append(item)
-
-                for status in flattened:
-                    if isinstance(status, dict):
-                        text = status.get("text")
-                        term = status.get("term")
+                for idx, item in enumerate(value, start=1):
+                    if isinstance(item, dict):
+                        text = item.get("text")
+                        term = item.get("term")
                         if text:
+                            # Keep display name as "Health Status" (no number), but use numbered key for uniqueness
                             processed_fields.append({
-                                "key": key,
-                                "title": "Health Status",
+                                "key": f"{key}_{idx}" if len(value) > 1 else key,
+                                "title": "Health Status",  # Display name without number
                                 "value": text
                             })
                         if term:
+                            # Keep display name as "Health Status Term Source ID" (no number)
                             processed_fields.append({
-                                "key": key,
-                                "title": "Term Source ID",
+                                "key": f"{key}_term_{idx}" if len(value) > 1 else f"{key}_term",
+                                "title": "Health Status Term Source ID",  # Display name without number
                                 "value": term
                             })
 
@@ -1400,12 +1399,15 @@ def _flatten_data_rows(rows, include_errors=False):
                 })
 
             # ---- Handle Child Of fields ----
+            # Create separate columns for each Child Of value (use numbered IDs, but same display name)
             elif key == "Child Of" and isinstance(value, list):
-                processed_fields.append({
-                    "key": key,
-                    "title": "Child Of",
-                    "value": ", ".join(str(item) for item in value if item)
-                })
+                for idx, item in enumerate(value, start=1):
+                    # Keep display name as "Child Of" (no number), but use numbered key for uniqueness
+                    processed_fields.append({
+                        "key": f"{key}_{idx}" if len(value) > 1 else key,
+                        "title": "Child Of",  # Display name without number
+                        "value": str(item) if item else ""
+                    })
 
             # ---- Handle complex objects ----
             elif not isinstance(value, (str, int, float, bool, type(None))):
@@ -1425,6 +1427,17 @@ def _flatten_data_rows(rows, include_errors=False):
 
         # attach processed fields list
         base["fields"] = processed_fields
+        
+        # Also create a flat dictionary structure for DataFrame compatibility
+        # Convert fields array to flat columns
+        # Use the key (with numbers) as the dict key, title is for display only
+        flat_dict = {"Sample Name": base["Sample Name"]}
+        for field in processed_fields:
+            key = field.get("key", "")
+            value = field.get("value", "")
+            if key:  # Use the numbered key as the dictionary key
+                flat_dict[key] = value
+        base.update(flat_dict)
 
         # include optional errors/warnings
         if include_errors:
@@ -1484,6 +1497,25 @@ def _normalize_header(header: str) -> str:
         return "Unit"
 
     return header
+
+
+def _get_column_display_name(col_id: str) -> str:
+    """
+    Get display name for a column ID by removing trailing numbers.
+    Examples:
+      'Health Status_1' -> 'Health Status'
+      'Health Status_2' -> 'Health Status'
+      'Child Of_1' -> 'Child Of'
+      'Health Status Term Source ID_1' -> 'Health Status Term Source ID'
+    """
+    if not isinstance(col_id, str):
+        return col_id
+    
+    # Remove trailing _1, _2, _3, etc. pattern
+    # Match pattern like _1, _2, _10 at the end
+    pattern = r'_\d+$'
+    display_name = re.sub(pattern, '', col_id)
+    return _normalize_header(display_name)
 
 
 def _match_field_to_col(field: str, available_cols) -> str | None:
