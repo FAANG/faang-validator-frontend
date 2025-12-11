@@ -9,6 +9,7 @@ from dash.dash_table import DataTable
 from dash.dependencies import Input, Output, State, MATCH, ALL
 import pandas as pd
 from dash.exceptions import PreventUpdate
+from typing import List, Dict, Any
 
 # Backend API URL - can be configured via environment variable
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
@@ -17,6 +18,197 @@ BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
 # Initialize the Dash app
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 server = app.server  # Expose server variable for gunicorn
+
+# Add custom CSS for tab label styling
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>
+            /* Style valid/invalid counts in tab labels */
+            .tab-label-valid {
+                color: #4CAF50;
+                font-weight: bold;
+            }
+            .tab-label-invalid {
+                color: #f44336;
+                font-weight: bold;
+            }
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>
+'''
+
+
+def process_headers(headers: List[str]) -> List[str]:
+    """Process headers according to the rules for duplicates."""
+    new_headers = []
+    i = 0
+    while i < len(headers):
+        h = headers[i]
+
+        # Case 1: Header contains a period (.)
+        if '.' in h and new_headers:
+            # Concatenate with the previous header name
+            prev_header = new_headers[-1]
+            new_header = h.split('.')[0]
+            new_headers.append(f"{prev_header} {new_header}")
+        # Case 2: Consecutive duplicates
+        elif i + 1 < len(headers) and headers[i + 1] == h:
+            new_headers.append(h)
+            while i + 1 < len(headers) and headers[i + 1] == h:
+                i += 1
+                new_headers.append(h)
+        else:
+            # Case 3: Non-consecutive duplicate
+            if h in new_headers:
+                # Concatenate with the last header name
+                last_header = new_headers[-1] if new_headers else ""
+                new_headers.append(f"{last_header}_{h}")
+            else:
+                new_headers.append(h)
+        i += 1
+    return new_headers
+
+
+def build_json_data(headers: List[str], rows: List[List[str]]) -> List[Dict[str, Any]]:
+    """
+    Build JSON structure from processed headers and rows.
+    Only include 'Health Status' if it exists in the headers.
+    Always treat 'Child Of', 'Specimen Picture URL', and 'Derived From' as lists.
+    """
+    grouped_data = []
+    has_health_status = any(h.startswith("Health Status") for h in headers)
+    has_cell_type = any(h.startswith("Cell Type") for h in headers)
+    has_child_of = any(h == "Child Of" for h in headers)
+    has_specimen_picture_url = any(h == "Specimen Picture URL" for h in headers)
+    has_derived_from = any(h == "Derived From" for h in headers)
+
+    for row in rows:
+        record: Dict[str, Any] = {}
+        if has_health_status:
+            record["Health Status"] = []
+        if has_cell_type:
+            record["Cell Type"] = []
+        if has_child_of:
+            record["Child Of"] = []
+        if has_specimen_picture_url:
+            record["Specimen Picture URL"] = []
+        if has_derived_from:
+            record["Derived From"] = []
+
+        i = 0
+        while i < len(headers):
+            col = headers[i]
+            val = row[i] if i < len(row) else ""
+            
+            # Convert val to string, handling NaN and None
+            if pd.isna(val) or val is None:
+                val = ""
+            else:
+                val = str(val).strip()
+
+            # ✅ Special handling if Health Status is in headers
+            if has_health_status and col.startswith("Health Status"):
+                # Skip if this header also contains "Term Source ID" (it's a processed header from process_headers)
+                # In that case, it was already handled when we processed the previous "Health Status" column
+                if "Term Source ID" in col:
+                    i += 1
+                    continue
+                
+                # Check next column for Term Source ID
+                if i + 1 < len(headers) and "Term Source ID" in headers[i + 1]:
+                    term_val = row[i + 1] if i + 1 < len(row) else ""
+                    if pd.isna(term_val) or term_val is None:
+                        term_val = ""
+                    else:
+                        term_val = str(term_val).strip()
+
+                    # Ensure we're using the correct values: val should be text, term_val should be term
+                    record["Health Status"].append({
+                        "text": val,  # Current column value is the health status text
+                        "term": term_val  # Next column value is the term source ID
+                    })
+                    i += 2  # Skip both Health Status and Term Source ID columns
+                else:
+                    # No Term Source ID following, just use the text value
+                    if val:
+                        record["Health Status"].append({
+                            "text": val,
+                            "term": ""
+                        })
+                    i += 1
+                continue
+
+            # ✅ Special handling if Cell Type is in headers
+            if has_cell_type and col.startswith("Cell Type"):
+                # Check next column for Term Source ID
+                if i + 1 < len(headers) and "Term Source ID" in headers[i + 1]:
+                    term_val = row[i + 1] if i + 1 < len(row) else ""
+                    if pd.isna(term_val) or term_val is None:
+                        term_val = ""
+                    else:
+                        term_val = str(term_val).strip()
+
+                    record["Cell Type"].append({
+                        "text": val,
+                        "term": term_val
+                    })
+                    i += 2
+                else:
+                    if val:
+                        record["Cell Type"].append({
+                            "text": val,
+                            "term": ""
+                        })
+                    i += 1
+                continue
+
+            # ✅ Special handling for Child Of headers
+            elif has_child_of and col.startswith("Child Of"):
+                if val:  # Only append non-empty values
+                    record["Child Of"].append(val)
+                i += 1
+                continue
+
+            # ✅ Special handling for Specimen Picture URL headers
+            elif has_specimen_picture_url and col.startswith("Specimen Picture URL"):
+                if val:  # Only append non-empty values
+                    record["Specimen Picture URL"].append(val)
+                i += 1
+                continue
+
+            # ✅ Special handling for Derived From headers
+            elif has_derived_from and col.startswith("Derived From"):
+                if val:  # Only append non-empty values
+                    record["Derived From"].append(val)
+                i += 1
+                continue
+
+            # ✅ Normal processing for all other columns
+            if col in record:
+                if not isinstance(record[col], list):
+                    record[col] = [record[col]]
+                record[col].append(val)
+            else:
+                record[col] = val
+            i += 1
+
+        grouped_data.append(record)
+
+    return grouped_data
 
 
 def _warnings_by_field(warnings_list):
@@ -203,6 +395,7 @@ app.layout = html.Div([
         dcc.Store(id='stored-filename'),
         dcc.Store(id='stored-all-sheets-data'),
         dcc.Store(id='stored-sheet-names'),
+        dcc.Store(id='stored-parsed-json'),  # Store parsed JSON from Excel for backend
         dcc.Store(id='error-popup-data', data={'visible': False, 'column': '', 'error': ''}),
         dcc.Store(id='active-sheet', data=None),
         dcc.Store(id='stored-json-validation-results', data=None),
@@ -228,8 +421,28 @@ app.layout = html.Div([
             ]
         ),
         dcc.Tabs([
-            dcc.Tab(label='Samples', style={'border': 'none'},
-                    selected_style={'border': 'none', 'borderBottom': '2px solid blue'}, children=[
+            dcc.Tab(label='Samples', style={
+                    'border': 'none',
+                    'padding': '12px 24px',
+                    'marginRight': '4px',
+                    'backgroundColor': '#f5f5f5',
+                    'color': '#666',
+                    'borderRadius': '8px 8px 0 0',
+                    'fontWeight': '500',
+                    'transition': 'all 0.3s ease',
+                    'cursor': 'pointer'
+                },
+                    selected_style={
+                    'border': 'none',
+                    'borderBottom': '3px solid #4CAF50',
+                    'backgroundColor': '#ffffff',
+                    'color': '#4CAF50',
+                    'padding': '12px 24px',
+                    'marginRight': '4px',
+                    'borderRadius': '8px 8px 0 0',
+                    'fontWeight': 'bold',
+                    'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
+                }, children=[
                     html.Div([
                         html.Label("1. Upload template"),
                         html.Div([
@@ -309,15 +522,55 @@ app.layout = html.Div([
                     html.Div(id="biosamples-form-mount"),
                     html.Div(id="biosamples-results-table")
                 ]),
-            dcc.Tab(label='Experiments', style={'border': 'none'},
-                    selected_style={'border': 'none', 'borderBottom': '2px solid blue'}, children=[
+            dcc.Tab(label='Experiments', style={
+                    'border': 'none',
+                    'padding': '12px 24px',
+                    'marginRight': '4px',
+                    'backgroundColor': '#f5f5f5',
+                    'color': '#666',
+                    'borderRadius': '8px 8px 0 0',
+                    'fontWeight': '500',
+                    'transition': 'all 0.3s ease',
+                    'cursor': 'pointer'
+                },
+                    selected_style={
+                    'border': 'none',
+                    'borderBottom': '3px solid #4CAF50',
+                    'backgroundColor': '#ffffff',
+                    'color': '#4CAF50',
+                    'padding': '12px 24px',
+                    'marginRight': '4px',
+                    'borderRadius': '8px 8px 0 0',
+                    'fontWeight': 'bold',
+                    'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
+                }, children=[
                     html.Div([], style={'margin': '20px 0'})
                 ]),
-            dcc.Tab(label='Analysis', style={'border': 'none'},
-                    selected_style={'border': 'none', 'borderBottom': '2px solid blue'}, children=[
+            dcc.Tab(label='Analysis', style={
+                    'border': 'none',
+                    'padding': '12px 24px',
+                    'marginRight': '4px',
+                    'backgroundColor': '#f5f5f5',
+                    'color': '#666',
+                    'borderRadius': '8px 8px 0 0',
+                    'fontWeight': '500',
+                    'transition': 'all 0.3s ease',
+                    'cursor': 'pointer'
+                },
+                    selected_style={
+                    'border': 'none',
+                    'borderBottom': '3px solid #4CAF50',
+                    'backgroundColor': '#ffffff',
+                    'color': '#4CAF50',
+                    'padding': '12px 24px',
+                    'marginRight': '4px',
+                    'borderRadius': '8px 8px 0 0',
+                    'fontWeight': 'bold',
+                    'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
+                }, children=[
                     html.Div([], style={'margin': '20px 0'})
                 ])
-        ], style={'margin': '20px 0', 'border': 'none'},
+        ], style={'margin': '20px 0', 'border': 'none', 'borderBottom': '2px solid #e0e0e0'},
             colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"})
     ], className='container')
 ])
@@ -332,31 +585,130 @@ app.layout = html.Div([
      Output('output-data-upload', 'children'),
      Output('stored-all-sheets-data', 'data'),
      Output('stored-sheet-names', 'data'),
+     Output('stored-parsed-json', 'data'),
      Output('active-sheet', 'data')],
     [Input('upload-data', 'contents')],
     [State('upload-data', 'filename')]
 )
 def store_file_data(contents, filename):
     if contents is None:
-        return None, None, "No file chosen", [], {'display': 'none'}, [], None, None, None
+        return None, None, "No file chosen", [], {'display': 'none'}, [], None, None, None, None
 
     try:
         content_type, content_string = contents.split(',')
 
+        # Parse Excel file to JSON immediately
+        # Decode base64 string to bytes
+        decoded = base64.b64decode(content_string)
+        excel_file = pd.ExcelFile(io.BytesIO(decoded), engine="openpyxl")
+        sheet_names = excel_file.sheet_names
+        all_sheets_data = {}
+        parsed_json_data = {}  # Store parsed JSON for backend
+        
+        # Create tabs for each sheet (only if sheet has data)
+        sheet_tabs = []
+        sheets_with_data = []  # Track sheets that have data
+        
+        for sheet in sheet_names:
+            df_sheet = excel_file.parse(sheet, dtype=str)
+            df_sheet = df_sheet.fillna("")
+            
+            # Skip empty sheets (no rows or empty DataFrame)
+            if df_sheet.empty or len(df_sheet) == 0:
+                continue
+            
+            # Store as list-of-dicts (JSON serializable) for display
+            sheet_records = df_sheet.to_dict("records")
+            all_sheets_data[sheet] = sheet_records
+            
+            # Convert to JSON format for backend using build_json_data rules
+            # First, get original headers
+            original_headers = [str(col) for col in df_sheet.columns]
+            
+            # Process headers according to duplicate rules
+            processed_headers = process_headers(original_headers)
+            
+            # Prepare rows data
+            rows = []
+            for _, row in df_sheet.iterrows():
+                row_list = [row[col] for col in df_sheet.columns]
+                rows.append(row_list)
+            
+            # Apply build_json_data rules with processed headers
+            parsed_json_records = build_json_data(processed_headers, rows)
+            parsed_json_data[sheet] = parsed_json_records
+            sheets_with_data.append(sheet)
+            
+            # Create DataTable for each sheet tab
+            # sheet_table = DataTable(
+            #     id={'type': 'uploaded-sheet-table', 'sheet': sheet},
+            #     data=sheet_records,
+            #     columns=[{"name": str(col), "id": str(col)} for col in df_sheet.columns],
+            #     page_size=10,
+            #     style_table={"overflowX": "auto"},
+            #     style_cell={"textAlign": "left", "padding": "6px"},
+            #     style_header={"fontWeight": "bold", "backgroundColor": "rgb(230, 230, 230)"},
+            #     style_data_conditional=[
+            #         {"if": {"row_index": "odd"}, "backgroundColor": "rgb(248, 248, 248)"}
+            #     ],
+            # )
+            
+            # # Create tab for this sheet
+            # sheet_tabs.append(
+            #     dcc.Tab(
+            #         label=sheet,
+            #         value=sheet,
+            #         style={'border': 'none'},
+            #         selected_style={'border': 'none', 'borderBottom': '2px solid blue'},
+            #         children=[
+            #             html.Div([
+            #                 sheet_table
+            #             ], style={'margin': '20px 0'})
+            #         ]
+            #     )
+            # )
+
+        # Use sheets_with_data for active_sheet and update sheet_names
+        active_sheet = sheets_with_data[0] if sheets_with_data else None
+        sheet_names = sheets_with_data  # Update to only include sheets with data
+
         file_selected_display = html.Div([
             html.H3("File Selected", id='original-file-heading'),
             html.P(f"File: {filename}", style={'fontWeight': 'bold'}),
-            html.P("Click 'Validate' to process the file and see results."),
         ])
 
-        output_data_upload_children = html.Div(id='sheet-tabs-container', style={'margin': '20px 0', 'display': 'none'})
+        # Display the parsed Excel data in tabs
+        if len(sheets_with_data) == 0:
+            # No sheets with data
+            output_data_upload_children = html.Div([
+                html.P("No data found in any sheet. Please upload a file with data.", 
+                       style={'color': 'orange', 'fontWeight': 'bold', 'margin': '20px 0'})
+            ], style={'margin': '20px 0'})
+        elif len(sheets_with_data) > 1:
+            # Multiple sheets - show as tabs
+            output_data_upload_children = html.Div([
+                dcc.Tabs(
+                    id='uploaded-sheets-tabs',
+                    value=active_sheet,
+                    children=sheet_tabs,
+                    style={'margin': '20px 0', 'border': 'none'},
+                    colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"}
+                )
+            ], style={'margin': '20px 0'})
+        else:
+            # Single sheet - show directly without tabs (but still use tab structure for consistency)
+            output_data_upload_children = html.Div([
+                html.Div([
+                    sheet_tabs[0].children[0] if sheet_tabs else html.Div()
+                ], style={'margin': '20px 0'}),
+                html.P("Click 'Validate' to send data to backend for validation.", 
+                       style={'marginTop': '20px', 'fontStyle': 'italic', 'color': '#666'})
+            ], style={'margin': '20px 0'})
 
-        all_sheets_data = {}
-        sheet_names = []
-        active_sheet = None
-
-        return contents, filename, filename, file_selected_display, {'display': 'block', 'margin': '20px 0'}, [
-            output_data_upload_children], all_sheets_data, sheet_names, active_sheet
+        return (contents, filename, filename, file_selected_display, 
+                {'display': 'block', 'margin': '20px 0'}, 
+                output_data_upload_children, 
+                all_sheets_data, sheet_names, parsed_json_data, active_sheet)
 
     except Exception as e:
         error_display = html.Div([
@@ -364,7 +716,7 @@ def store_file_data(contents, filename):
             html.P(f"Error processing file: {str(e)}", style={'color': 'red'})
         ])
         return contents, filename, filename, error_display, {'display': 'block',
-                                                             'margin': '20px 0'}, [], None, None, None
+                                                             'margin': '20px 0'}, [], None, None, None, None
 
 
 # Callback to show and enable validate button when a file is uploaded
@@ -390,11 +742,12 @@ def show_and_enable_buttons(file_data):
      State('stored-filename', 'data'),
      State('output-data-upload', 'children'),
      State('stored-all-sheets-data', 'data'),
-     State('stored-sheet-names', 'data')],
+     State('stored-sheet-names', 'data'),
+     State('stored-parsed-json', 'data')],
     prevent_initial_call=True
 )
-def validate_data(n_clicks, contents, filename, current_children, all_sheets_data, sheet_names):
-    if n_clicks is None or contents is None:
+def validate_data(n_clicks, contents, filename, current_children, all_sheets_data, sheet_names, parsed_json):
+    if n_clicks is None or parsed_json is None:
         return current_children if current_children else html.Div([]), None
 
     error_data = []
@@ -405,15 +758,37 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
     json_validation_results = None
 
     try:
-        content_type, content_string = contents.split(',')
-        decoded = io.BytesIO(base64.b64decode(content_string))
-
-        files = {'file': (filename, decoded, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
-        response = requests.post(
-            'https://faang-validator-backend-service-964531885708.europe-west2.run.app/validate-file',
-            files=files,
-            headers={'accept': 'application/json'}
-        )
+        # Send parsed JSON to backend for validation
+        import json
+        
+        # Send parsed JSON to backend for validation
+        # Try JSON endpoint first, fallback to file upload if needed
+        try:
+            print(json.dumps(parsed_json))
+            # Try sending as JSON
+            response = requests.post(
+                f'http://localhost:8000/validate-data',
+                json={"data": parsed_json},
+                headers={'accept': 'application/json', 'Content-Type': 'application/json'}
+            )
+            if response.status_code != 200:
+                raise Exception(f"JSON endpoint returned {response.status_code}")
+        except Exception as json_err:
+            # Fallback: if JSON endpoint doesn't exist, send as file
+            print(f"JSON endpoint failed: {json_err}, falling back to file upload")
+            if contents:
+                content_type, content_string = contents.split(',')
+                decoded = io.BytesIO(base64.b64decode(content_string))
+                files = {'file': (filename, decoded, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
+                # Use base URL for validate-file endpoint (matches original implementation)
+                base_url = BACKEND_API_URL.rstrip('/api')
+                response = requests.post(
+                    f'{base_url}/validate-file',
+                    files=files,
+                    headers={'accept': 'application/json'}
+                )
+            else:
+                raise Exception("No file data available for validation")
         if response.status_code == 200:
             response_json = response.json()
         else:
@@ -671,26 +1046,186 @@ def populate_validation_results_tabs(validation_results):
         return []
 
     sample_type_tabs = []
+    sample_types_with_data = []
+    
     for sample_type in sample_types:
         v, iv = _count_valid_invalid_for_type(validation_results, sample_type)
-        label = f"{sample_type.capitalize()} ({v} valid / {iv} invalid)"
-        sample_type_tabs.append(
-            dcc.Tab(
-                label=label,
-                value=sample_type,
-                style={'border': 'none'},
-                selected_style={'border': 'none', 'borderBottom': '2px solid blue'},
-                children=[html.Div(id={'type': 'sample-type-content', 'index': sample_type})]
+        # Only include tabs that have data (valid or invalid samples)
+        if v > 0 or iv > 0:
+            sample_types_with_data.append(sample_type)
+            # Create label as string (dcc.Tab only accepts strings for label)
+            # We'll use JavaScript to add colors after rendering
+            label = f"{sample_type.capitalize()} ({v} valid / {iv} invalid)"
+            sample_type_tabs.append(
+                dcc.Tab(
+                    label=label,
+                    value=sample_type,
+                    id={'type': 'sample-type-tab', 'sample_type': sample_type},
+                    style={
+                        'border': 'none',
+                        'padding': '12px 24px',
+                        'marginRight': '4px',
+                        'backgroundColor': '#f5f5f5',
+                        'color': '#666',
+                        'borderRadius': '8px 8px 0 0',
+                        'fontWeight': '500',
+                        'transition': 'all 0.3s ease',
+                        'cursor': 'pointer'
+                    },
+                    selected_style={
+                        'border': 'none',
+                        'borderBottom': '3px solid #4CAF50',
+                        'backgroundColor': '#ffffff',
+                        'color': '#4CAF50',
+                        'padding': '12px 24px',
+                        'marginRight': '4px',
+                        'borderRadius': '8px 8px 0 0',
+                        'fontWeight': 'bold',
+                        'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
+                    },
+                    children=[html.Div(id={'type': 'sample-type-content', 'index': sample_type})]
+                )
             )
-        )
+
+    if not sample_type_tabs:
+        return html.Div([
+            html.P("No validation data available.", style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
+        ])
 
     tabs = dcc.Tabs(
         id='sample-type-tabs',
-        value=sample_types[0] if sample_types else None,
+        value=sample_types_with_data[0] if sample_types_with_data else None,
         children=sample_type_tabs,
-        style={'border': 'none'},
-        colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"}
+        style={
+            'border': 'none',
+            'borderBottom': '2px solid #e0e0e0',
+            'marginBottom': '20px'
+        },
+        colors={
+            "border": "transparent",
+            "primary": "#4CAF50",
+            "background": "#f5f5f5"
+        }
     )
+    
+    # Add a script component to style the tab labels with colors
+    # This will be executed after the tabs are rendered
+    style_script = html.Script("""
+        (function() {
+            function styleTabLabels() {
+                // Find the tab container
+                const tabContainer = document.getElementById('sample-type-tabs');
+                if (!tabContainer) {
+                    console.log('Tab container not found');
+                    return;
+                }
+                
+                // Dash tabs are typically rendered with role="tablist" and children with role="tab"
+                // Try multiple selectors to find tab elements
+                let tabLabels = tabContainer.querySelectorAll('[role="tab"]');
+                
+                // If not found, try other common patterns
+                if (tabLabels.length === 0) {
+                    tabLabels = tabContainer.querySelectorAll('.tab, [class*="tab"], [class*="Tab"]');
+                }
+                
+                // Also try finding by data attributes or IDs
+                if (tabLabels.length === 0) {
+                    tabLabels = tabContainer.querySelectorAll('div, button, a');
+                }
+                
+                console.log('Found', tabLabels.length, 'potential tab elements');
+                
+                tabLabels.forEach((tab, index) => {
+                    // Try to find the actual text node or label element
+                    let textElement = tab;
+                    let originalText = tab.textContent || tab.innerText || '';
+                    
+                    // If the tab has children, try to find the label element
+                    if (tab.children.length > 0) {
+                        for (let child of tab.children) {
+                            const childText = child.textContent || child.innerText || '';
+                            if (childText && (childText.includes('valid') || childText.includes('invalid'))) {
+                                textElement = child;
+                                originalText = childText;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (originalText && (originalText.includes('valid') || originalText.includes('invalid'))) {
+                        // Check if already styled to avoid re-processing
+                        if (textElement.querySelector && textElement.querySelector('span[style*="color"]')) {
+                            return;
+                        }
+                        
+                        // Create styled version with spans
+                        const styled = originalText.replace(
+                            /(\\d+)\\s+valid/g, 
+                            '<span style="color: #4CAF50 !important; font-weight: bold !important;">$1 valid</span>'
+                        ).replace(
+                            /(\\d+)\\s+invalid/g, 
+                            '<span style="color: #f44336 !important; font-weight: bold !important;">$1 invalid</span>'
+                        );
+                        
+                        if (styled !== originalText && styled.includes('<span')) {
+                            try {
+                                textElement.innerHTML = styled;
+                                console.log('Styled tab', index, ':', originalText.substring(0, 50));
+                            } catch (e) {
+                                console.error('Error styling tab', index, ':', e);
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Multiple attempts to ensure tabs are styled
+            function attemptStyle() {
+                styleTabLabels();
+            }
+            
+            // Run immediately
+            attemptStyle();
+            
+            // Run after short delays
+            setTimeout(attemptStyle, 100);
+            setTimeout(attemptStyle, 300);
+            setTimeout(attemptStyle, 500);
+            setTimeout(attemptStyle, 1000);
+            
+            // Use MutationObserver to watch for changes
+            const observer = new MutationObserver(function(mutations) {
+                setTimeout(attemptStyle, 50);
+            });
+            
+            const container = document.getElementById('sample-type-tabs');
+            if (container) {
+                observer.observe(container, { 
+                    childList: true, 
+                    subtree: true,
+                    characterData: true,
+                    attributes: true
+                });
+            }
+            
+            // Also run on various events
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', attemptStyle);
+            }
+            
+            window.addEventListener('load', function() {
+                setTimeout(attemptStyle, 200);
+            });
+            
+            // Watch for Dash renderer updates
+            if (window.dash_clientside) {
+                window.dash_clientside.no_update = function() {
+                    setTimeout(attemptStyle, 100);
+                };
+            }
+        })();
+    """)
 
     header_bar = html.Div(
         [
@@ -718,16 +1253,17 @@ def populate_validation_results_tabs(validation_results):
         }
     )
 
-    return html.Div([header_bar, tabs], style={"marginTop": "8px"})
+    return html.Div([header_bar, tabs, style_script], style={"marginTop": "8px"})
 
 
 # Callback to populate sample type content when tab is selected
 @app.callback(
     Output({'type': 'sample-type-content', 'index': MATCH}, 'children'),
     [Input('sample-type-tabs', 'value')],
-    [State('stored-json-validation-results', 'data')]
+    [State('stored-json-validation-results', 'data'),
+     State('stored-all-sheets-data', 'data')]
 )
-def populate_sample_type_content(selected_sample_type, validation_results):
+def populate_sample_type_content(selected_sample_type, validation_results, all_sheets_data):
     if validation_results is None or selected_sample_type is None:
         return []
 
@@ -737,7 +1273,7 @@ def populate_sample_type_content(selected_sample_type, validation_results):
     if selected_sample_type not in results_by_type:
         return html.Div("No data available for this sample type.")
 
-    return make_sample_type_panel(selected_sample_type, results_by_type)
+    return make_sample_type_panel(selected_sample_type, results_by_type, all_sheets_data)
 
 
 @app.callback(
@@ -814,7 +1350,7 @@ def create_sheet_tabs_ui(sheet_names, active_sheet, all_sheets_data=None):
     return tabs
 
 
-def make_sample_type_panel(sample_type: str, results_by_type: dict):
+def make_sample_type_panel(sample_type: str, results_by_type: dict, all_sheets_data: dict = None):
     import uuid
     panel_id = str(uuid.uuid4())
 
@@ -825,51 +1361,119 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict):
     if invalid_key.endswith('ss'):
         invalid_key = invalid_key[:-1]
 
+    # Get all rows (valid + invalid) with error information
     invalid_rows = _flatten_data_rows(st_data.get(invalid_key), include_errors=True)
     valid_rows = _flatten_data_rows(st_data.get(valid_key))
+    all_rows = invalid_rows + valid_rows
 
-    rows_for_df_err = []
-    for row in invalid_rows:
-        rc = row.copy()
-        rc.pop('errors', None)
-        rc.pop('warnings', None)
-        rows_for_df_err.append(rc)
-    df_err = _df(rows_for_df_err)
-
-    cell_styles_err = []
-    tooltip_err = []
-    cols_with_real_errors = set()
-
+    # Create a mapping of sample_name to error/warning info
+    error_map = {}  # {sample_name: {field: [errors]}}
+    warning_map = {}  # {sample_name: {field: [warnings]}}
+    
     def _as_list(msgs):
         if isinstance(msgs, list):
             return [str(m) for m in msgs]
         return [str(msgs)]
 
-    for i, row in enumerate(invalid_rows):
-        tips = {}
+    # Map errors from invalid rows
+    for row in invalid_rows:
+        sample_name = row.get("Sample Name", "")
+        if not sample_name:
+            continue
         row_err = row.get("errors") or {}
         if isinstance(row_err, dict) and "field_errors" in row_err:
             row_err = row_err["field_errors"]
+        error_map[sample_name] = row_err
 
-        for field, msgs in (row_err or {}).items():
-            if df_err.empty:
-                continue
-            col = _resolve_col(field, df_err.columns)
-            if not col:
-                continue
+    # Map warnings from valid rows
+    for row in valid_rows:
+        sample_name = row.get("Sample Name", "")
+        if not sample_name:
+            continue
+        warnings = row.get("warnings", [])
+        if warnings:
+            warning_map[sample_name] = _warnings_by_field(warnings)
 
-            msgs_list = _as_list(msgs)
-            is_extra = any("extra inputs are not permitted" in m.lower() for m in msgs_list)
+    # Get original sheet data - try to find matching sheet
+    original_data = []
+    if all_sheets_data:
+        # Find the first sheet that has data matching our sample names
+        sample_names_set = {row.get("Sample Name", "") for row in all_rows if row.get("Sample Name")}
+        for sheet_name, sheet_records in all_sheets_data.items():
+            if sheet_records:
+                # Check if this sheet has matching sample names
+                sheet_sample_names = {str(record.get("Sample Name", "")) for record in sheet_records}
+                if sample_names_set.intersection(sheet_sample_names):
+                    original_data = sheet_records
+                    break
 
-            if is_extra:
-                cell_styles_err.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#fff4cc'})
-                tips[col] = {'value': f"**Warning**: {field} — " + " | ".join(msgs_list), 'type': 'markdown'}
-            else:
-                cell_styles_err.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#ffcccc'})
-                tips[col] = {'value': f"**Error**: {field} — " + " | ".join(msgs_list), 'type': 'markdown'}
-                cols_with_real_errors.add(col)
+    # Use original data if available, otherwise use flattened validation data
+    if original_data:
+        # Merge original data with error/warning information
+        table_data = []
+        for orig_row in original_data:
+            sample_name = str(orig_row.get("Sample Name", ""))
+            row_copy = orig_row.copy()
+            table_data.append(row_copy)
+        
+        # Create DataFrame from original data
+        df_all = pd.DataFrame(table_data)
+    else:
+        # Fallback: use validation data
+        rows_for_df = []
+        for row in all_rows:
+            rc = row.copy()
+            rc.pop('errors', None)
+            rc.pop('warnings', None)
+            rows_for_df.append(rc)
+        df_all = _df(rows_for_df)
 
-        tooltip_err.append(tips)
+    if df_all.empty:
+        return html.Div([html.H4("No data available", style={'textAlign': 'center', 'margin': '10px 0'})])
+
+    # Build cell styles and tooltips for all rows
+    cell_styles = []
+    tooltip_data = []
+    cols_with_real_errors = set()
+
+    for i, row in df_all.iterrows():
+        sample_name = str(row.get("Sample Name", ""))
+        tips = {}
+        row_styles = []
+
+        # Check for errors
+        if sample_name in error_map:
+            field_errors = error_map[sample_name]
+            for field, msgs in (field_errors or {}).items():
+                col = _resolve_col(field, df_all.columns)
+                if not col:
+                    continue
+                msgs_list = _as_list(msgs)
+                is_extra = any("extra inputs are not permitted" in m.lower() for m in msgs_list)
+
+                if is_extra:
+                    row_styles.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#fff4cc'})
+                    tips[col] = {'value': f"**Warning**: {field} — " + " | ".join(msgs_list), 'type': 'markdown'}
+                else:
+                    row_styles.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#ffcccc'})
+                    tips[col] = {'value': f"**Error**: {field} — " + " | ".join(msgs_list), 'type': 'markdown'}
+                    cols_with_real_errors.add(col)
+
+        # Check for warnings
+        if sample_name in warning_map:
+            field_warnings = warning_map[sample_name]
+            for field, msgs in (field_warnings or {}).items():
+                col = _resolve_col(field, df_all.columns)
+                if not col:
+                    continue
+                # Only add warning style if not already styled by error
+                if not any(s.get('column_id') == col for s in row_styles):
+                    row_styles.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#fff4cc'})
+                if col not in tips:
+                    tips[col] = {'value': f"**Warning**: {field} — " + " | ".join(map(str, msgs)), 'type': 'markdown'}
+
+        cell_styles.extend(row_styles)
+        tooltip_data.append(tips)
 
     tint_whole_columns = [
         {'if': {'column_id': c}, 'backgroundColor': '#ffd6d6'}
@@ -878,69 +1482,36 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict):
 
     base_cell = {"textAlign": "left", "padding": "6px", "minWidth": 120, "whiteSpace": "normal", "height": "auto"}
     zebra = [{'if': {'row_index': 'odd'}, 'backgroundColor': 'rgb(248, 248, 248)'}]
+
+    # Create columns with cleaned display names (remove part after period)
+    def clean_header_name(header):
+        """Remove part after period from header name for display"""
+        if '.' in header:
+            return header.split('.')[0]
+        return header
+    
+    columns = [{"name": clean_header_name(c), "id": c} for c in df_all.columns]
+    
     blocks = [
-        html.H4("Records With Error", style={'textAlign': 'center', 'margin': '10px 0'}),
+        html.H4("Validation Results", style={'textAlign': 'center', 'margin': '10px 0'}),
         html.Div([
             DataTable(
-                id={"type": "result-table-error", "sample_type": sample_type, "panel_id": panel_id},
-                data=df_err.to_dict("records"),
-                columns=[{"name": c, "id": c} for c in (df_err.columns if not df_err.empty else [])],
+                id={"type": "result-table-all", "sample_type": sample_type, "panel_id": panel_id},
+                data=df_all.to_dict("records"),
+                columns=columns,
                 page_size=10,
                 style_table={"overflowX": "auto"},
-                style_cell=base_cell,
-                style_header={"fontWeight": "bold"},
-                style_data_conditional=zebra + cell_styles_err + tint_whole_columns,
-                tooltip_data=tooltip_err,
+                style_cell={"textAlign": "left", "padding": "6px"},
+                style_header={"fontWeight": "bold", "backgroundColor": "rgb(230, 230, 230)"},
+                # style_cell=base_cell,
+                # style_header={"fontWeight": "bold"},
+                style_data_conditional=zebra + cell_styles + tint_whole_columns,
+                tooltip_data=tooltip_data,
                 tooltip_duration=None
             )
-        ], id={"type": "table-container-error", "sample_type": sample_type, "panel_id": panel_id},
+        ], id={"type": "table-container-all", "sample_type": sample_type, "panel_id": panel_id},
             style={'display': 'block'}),
     ]
-
-    warning_rows = [row for row in valid_rows if row.get('warnings')]
-    if warning_rows:
-        rows_for_df_warn = []
-        for row in warning_rows:
-            rc = row.copy()
-            rc.pop('warnings', None)
-            rows_for_df_warn.append(rc)
-        df_warn = _df(rows_for_df_warn)
-
-        cell_styles_warn = []
-        tooltip_warn = []
-        for i, row in enumerate(warning_rows):
-            by_field = _warnings_by_field(row.get('warnings', []))
-            tips = {}
-            for field, msgs in (by_field or {}).items():
-                col = _resolve_col(field, df_warn.columns)
-                if not col:
-                    continue
-                cell_styles_warn.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#fff4cc'})
-                tips[col] = {'value': f"**Warning**: {field} — " + " | ".join(map(str, msgs)), 'type': 'markdown'}
-            tooltip_warn.append(tips)
-        blocks += [
-            html.H4("Records With Warnings", style={'textAlign': 'center', 'margin': '20px 0 10px'}),
-            html.Div([
-                DataTable(
-                    id={"type": "result-table-warning", "sample_type": sample_type, "panel_id": panel_id},
-                    data=df_warn.to_dict("records"),
-                    columns=[{"name": c, "id": c} for c in df_warn.columns],
-                    page_size=10,
-                    style_table={"overflowX": "auto"},
-                    style_cell=base_cell,
-                    style_header={"fontWeight": "bold"},
-                    style_data_conditional=zebra + cell_styles_warn,
-                    tooltip_data=tooltip_warn,
-                    tooltip_duration=None
-                )
-            ], id={"type": "table-container-warning", "sample_type": sample_type, "panel_id": panel_id},
-                style={'display': 'block'})
-        ]
-
-    if not invalid_rows and not warning_rows:
-        blocks = [
-            html.H4("No errors or warnings", style={'textAlign': 'center', 'margin': '10px 0'})
-        ]
 
     return html.Div(blocks)
 
@@ -1188,6 +1759,85 @@ app.clientside_callback(
     Output('dummy-output-for-reset', 'children'),
     [Input('reset-button', 'n_clicks')],
     prevent_initial_call=True
+)
+
+# Clientside callback to style tab labels when validation results are updated
+app.clientside_callback(
+    """
+    function(validation_results) {
+        if (!validation_results) {
+            return window.dash_clientside.no_update;
+        }
+        
+        // Function to style tab labels
+        function styleTabLabels() {
+            const tabContainer = document.getElementById('sample-type-tabs');
+            if (!tabContainer) {
+                return;
+            }
+            
+            // Try multiple selectors to find tab elements
+            let tabLabels = tabContainer.querySelectorAll('[role="tab"]');
+            if (tabLabels.length === 0) {
+                tabLabels = tabContainer.querySelectorAll('.tab, [class*="tab"], [class*="Tab"], div[class*="tab"]');
+            }
+            if (tabLabels.length === 0) {
+                tabLabels = tabContainer.querySelectorAll('div, button, a, span');
+            }
+            
+            tabLabels.forEach((tab) => {
+                let textElement = tab;
+                let originalText = tab.textContent || tab.innerText || '';
+                
+                // Check children for text
+                if (tab.children && tab.children.length > 0) {
+                    for (let child of Array.from(tab.children)) {
+                        const childText = child.textContent || child.innerText || '';
+                        if (childText && (childText.includes('valid') || childText.includes('invalid'))) {
+                            textElement = child;
+                            originalText = childText;
+                            break;
+                        }
+                    }
+                }
+                
+                if (originalText && (originalText.includes('valid') || originalText.includes('invalid'))) {
+                    // Skip if already styled
+                    if (textElement.querySelector && textElement.querySelector('span[style*="color"]')) {
+                        return;
+                    }
+                    
+                    // Create styled version
+                    const styled = originalText.replace(
+                        /(\\d+)\\s+valid/g, 
+                        '<span style="color: #4CAF50 !important; font-weight: bold !important;">$1 valid</span>'
+                    ).replace(
+                        /(\\d+)\\s+invalid/g, 
+                        '<span style="color: #f44336 !important; font-weight: bold !important;">$1 invalid</span>'
+                    );
+                    
+                    if (styled !== originalText && styled.includes('<span')) {
+                        try {
+                            textElement.innerHTML = styled;
+                        } catch (e) {
+                            console.error('Error styling tab:', e);
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Run after delays to ensure DOM is ready
+        setTimeout(styleTabLabels, 100);
+        setTimeout(styleTabLabels, 500);
+        setTimeout(styleTabLabels, 1000);
+        
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('validation-results-container', 'children', allow_duplicate=True),
+    [Input('stored-json-validation-results', 'data')],
+    prevent_initial_call='initial_duplicate'
 )
 
 if __name__ == '__main__':
