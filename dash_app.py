@@ -13,7 +13,7 @@ from typing import List, Dict, Any
 
 # Backend API URL - can be configured via environment variable
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
-                                 'https://faang-validator-backend-service-964531885708.europe-west2.run.app/api')
+                                 'https://faang-validator-backend-service-964531885708.europe-west2.run.app')
 
 # Initialize the Dash app
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
@@ -638,37 +638,7 @@ def store_file_data(contents, filename):
             parsed_json_records = build_json_data(processed_headers, rows)
             parsed_json_data[sheet] = parsed_json_records
             sheets_with_data.append(sheet)
-            
-            # Create DataTable for each sheet tab
-            # sheet_table = DataTable(
-            #     id={'type': 'uploaded-sheet-table', 'sheet': sheet},
-            #     data=sheet_records,
-            #     columns=[{"name": str(col), "id": str(col)} for col in df_sheet.columns],
-            #     page_size=10,
-            #     style_table={"overflowX": "auto"},
-            #     style_cell={"textAlign": "left", "padding": "6px"},
-            #     style_header={"fontWeight": "bold", "backgroundColor": "rgb(230, 230, 230)"},
-            #     style_data_conditional=[
-            #         {"if": {"row_index": "odd"}, "backgroundColor": "rgb(248, 248, 248)"}
-            #     ],
-            # )
-            
-            # # Create tab for this sheet
-            # sheet_tabs.append(
-            #     dcc.Tab(
-            #         label=sheet,
-            #         value=sheet,
-            #         style={'border': 'none'},
-            #         selected_style={'border': 'none', 'borderBottom': '2px solid blue'},
-            #         children=[
-            #             html.Div([
-            #                 sheet_table
-            #             ], style={'margin': '20px 0'})
-            #         ]
-            #     )
-            # )
 
-        # Use sheets_with_data for active_sheet and update sheet_names
         active_sheet = sheets_with_data[0] if sheets_with_data else None
         sheet_names = sheets_with_data  # Update to only include sheets with data
 
@@ -758,16 +728,10 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
     json_validation_results = None
 
     try:
-        # Send parsed JSON to backend for validation
-        import json
-        
-        # Send parsed JSON to backend for validation
-        # Try JSON endpoint first, fallback to file upload if needed
         try:
-            print(json.dumps(parsed_json))
-            # Try sending as JSON
+
             response = requests.post(
-                f'http://localhost:8000/validate-data',
+                f'{BACKEND_API_URL}/validate-data',
                 json={"data": parsed_json},
                 headers={'accept': 'application/json', 'Content-Type': 'application/json'}
             )
@@ -775,26 +739,11 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
                 raise Exception(f"JSON endpoint returned {response.status_code}")
         except Exception as json_err:
             # Fallback: if JSON endpoint doesn't exist, send as file
-            print(f"JSON endpoint failed: {json_err}, falling back to file upload")
-            if contents:
-                content_type, content_string = contents.split(',')
-                decoded = io.BytesIO(base64.b64decode(content_string))
-                files = {'file': (filename, decoded, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')}
-                # Use base URL for validate-file endpoint (matches original implementation)
-                base_url = BACKEND_API_URL.rstrip('/api')
-                response = requests.post(
-                    f'{base_url}/validate-file',
-                    files=files,
-                    headers={'accept': 'application/json'}
-                )
-            else:
-                raise Exception("No file data available for validation")
+            print(f"JSON endpoint failed: {json_err}")
         if response.status_code == 200:
             response_json = response.json()
         else:
             raise Exception(f"Error {response.status_code}: {response.text}")
-
-        print("Using validation_results.json file for validation results")
 
         if isinstance(response_json, dict) and 'results' in response_json:
             json_validation_results = response_json
