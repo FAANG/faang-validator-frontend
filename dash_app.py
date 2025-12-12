@@ -1464,11 +1464,10 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict, all_sheets_d
 
     return html.Div(blocks)
 
-
 @app.callback(
     Output("biosamples-form-mount", "children"),
     Input("stored-json-validation-results", "data"),
-    prevent_initial_call=True
+    prevent_initial_call=True,
 )
 def _mount_biosamples_form(v):
     if not v or "results" not in v:
@@ -1482,40 +1481,63 @@ def _mount_biosamples_form(v):
 
 
 @app.callback(
-    [Output("biosamples-form", "style"),
-     Output("biosamples-status-banner", "children"),
-     Output("biosamples-status-banner", "style")],
-    Input("stored-json-validation-results", "data")
+    [
+        Output("biosamples-form", "style"),
+        Output("biosamples-status-banner", "children"),
+        Output("biosamples-status-banner", "style"),
+    ],
+    Input("stored-json-validation-results", "data"),
 )
 def _toggle_biosamples_form(v):
     base_style = {"display": "block", "marginTop": "16px"}
 
     if not v or "results" not in v:
-        return (
-            {"display": "none"},
-            "",
-            {"display": "none"}
-        )
+        return ({"display": "none"}, "", {"display": "none"})
 
     valid_cnt, invalid_cnt = _valid_invalid_counts(v)
-    style_ok = {"display": "block", "backgroundColor": "#e6f4ea", "border": "1px solid #b7e1c5", "color": "#137333",
-                "padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px", "fontWeight": 500}
-    style_warn = {"display": "block", "backgroundColor": "#fff7e6", "border": "1px solid #ffd699", "color": "#8a6d3b",
-                  "padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px", "fontWeight": 500}
+    style_ok = {
+        "display": "block",
+        "backgroundColor": "#e6f4ea",
+        "border": "1px solid #b7e1c5",
+        "color": "#137333",
+        "padding": "10px 12px",
+        "borderRadius": "8px",
+        "marginBottom": "12px",
+        "fontWeight": 500,
+    }
+    style_warn = {
+        "display": "block",
+        "backgroundColor": "#fff7e6",
+        "border": "1px solid #ffd699",
+        "color": "#8a6d3b",
+        "padding": "10px 12px",
+        "borderRadius": "8px",
+        "marginBottom": "12px",
+        "fontWeight": 500,
+    }
     if valid_cnt > 0:
-        msg_children = [html.Span(f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s)."),
-                        html.Br()]
+        msg_children = [
+            html.Span(
+                f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s)."
+            ),
+            html.Br(),
+        ]
         return base_style, msg_children, style_ok
     else:
-        return base_style, (f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s). No valid samples "
-                            f"to submit."), style_warn
+        return (
+            base_style,
+            f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s). No valid samples to submit.",
+            style_warn,
+        )
 
 
 @app.callback(
     Output("biosamples-submit-btn", "disabled"),
-    [Input("biosamples-username", "value"),
-     Input("biosamples-password", "value"),
-     Input("stored-json-validation-results", "data")]
+    [
+        Input("biosamples-username", "value"),
+        Input("biosamples-password", "value"),
+        Input("stored-json-validation-results", "data"),
+    ],
 )
 def _disable_submit(u, p, v):
     if not v or "results" not in v:
@@ -1527,164 +1549,133 @@ def _disable_submit(u, p, v):
 
 
 @app.callback(
-    [Output("submission-job-id", "data"),
-     Output("biosamples-submit-msg", "children", allow_duplicate=True),
-     Output("submission-env", "data")],
-    Input("biosamples-start-btn", "n_clicks"),
-    [State("biosamples-env", "value"),
-     State("biosamples-action", "value"),
-     State("stored-json-validation-results", "data")],
-    prevent_initial_call=True
-)
-def _start_submission(n, env, action, v):
-    if not n:
-        raise PreventUpdate
-    valid_records = _collect_valid_records(v)
-    if not valid_records:
-        return None, html.Span("No valid samples to prepare.", style={"color": "#c62828", "fontWeight": 500}), None
-    body = {"environment": env, "action": action, "valid_samples": valid_records,
-            "summary": dict(zip(("valid", "invalid"), _valid_invalid_counts(v)))}
-    try:
-        r = requests.post(f"{BACKEND_API_URL}/submission/start", json=body, timeout=60)
-        if r.ok:
-            job_id = (r.json() or {}).get("job_id")
-            msg = html.Span(f"Preparation started. Job ID: {job_id}", style={"color": "#1976d2", "fontWeight": 500})
-            return job_id, msg, env
-        else:
-            return None, html.Span(f"Start failed [{r.status_code}]: {r.text}",
-                                   style={"color": "#c62828", "fontWeight": 500}), None
-    except Exception as e:
-        return None, html.Span(f"Start error: {e}", style={"color": "#c62828", "fontWeight": 500}), None
-
-
-@app.callback(
-    [Output("biosamples-submit-msg", "children"),
-     Output("submission-job-id", "data", allow_duplicate=True),
-     Output("submission-room-id", "data", allow_duplicate=True)],
+    [
+        Output("biosamples-submit-msg", "children"),
+        Output("biosamples-results-table", "children"),
+    ],
     Input("biosamples-submit-btn", "n_clicks"),
-    [State("submission-job-id", "data"),
-     State("submission-room-id", "data"),
-     State("biosamples-username", "value"),
-     State("biosamples-password", "value"),
-     State("biosamples-env", "value"),
-     State("stored-json-validation-results", "data"),
-     State("biosamples-action", "value")],
-    prevent_initial_call=True
+    State("biosamples-username", "value"),
+    State("biosamples-password", "value"),
+    State("biosamples-env", "value"),
+    State("biosamples-action", "value"),
+    State("stored-json-validation-results", "data"),
+    prevent_initial_call=True,
 )
-def _submit_to_biosamples(n, task_id, room_id, username, password, env, v, action):
+def _submit_to_biosamples(n, username, password, env, action, v):
     if not n:
         raise PreventUpdate
+
+    if not v or "results" not in v:
+        msg = html.Span(
+            "No validation results available. Please validate your file first.",
+            style={"color": "#c62828", "fontWeight": 500},
+        )
+        return msg, dash.no_update
+
+    valid_cnt, invalid_cnt = _valid_invalid_counts(v)
+    if valid_cnt == 0:
+        msg = html.Span(
+            "No valid samples to submit. Please fix errors and re-validate.",
+            style={"color": "#c62828", "fontWeight": 500},
+        )
+        return msg, dash.no_update
 
     if not username or not password:
-        msg = html.Span("Enter username and password.", style={"color": "#c62828", "fontWeight": 500})
-        return msg, dash.no_update, dash.no_update
+        msg = html.Span(
+            "Please enter Webin username and password.",
+            style={"color": "#c62828", "fontWeight": 500},
+        )
+        return msg, dash.no_update
 
-    if not task_id or not room_id:
-        valid_records = _collect_valid_records(v)
-        if not valid_records:
-            msg = html.Span("No valid samples to prepare.", style={"color": "#c62828", "fontWeight": 500})
-            return msg, dash.no_update, dash.no_update
+    validation_results = v["results"]
 
-        prep_body = {
-            "environment": env,
-            "action": action,
-            "valid_samples": valid_records,
-            "summary": dict(zip(("valid", "invalid"), _valid_invalid_counts(v)))
-        }
-        try:
-            r0 = requests.post(f"{BACKEND_API_URL}/submission/start", json=prep_body, timeout=60)
-            if r0.ok:
-                data0 = r0.json() or {}
-                task_id = data0.get("job_id") or task_id
-                room_id = data0.get("room_id") or room_id
-            else:
-                msg = html.Span(f"Start failed [{r0.status_code}]: {r0.text}",
-                                style={"color": "#c62828", "fontWeight": 500})
-                return msg, dash.no_update, dash.no_update
-        except Exception as e:
-            msg = html.Span(f"Start error: {e}", style={"color": "#c62828", "fontWeight": 500})
-            return msg, dash.no_update, dash.no_update
-
-        if not room_id:
-            room_id = str(uuid4())
-
-    url = f"{BACKEND_API_URL}/submission/submission/samples/{task_id}/{room_id}/submit_records"
     body = {
-        "private_submission": False,
-        "mode": "prod" if env == "prod" else "test",
-        "username": username,
-        "password": password
+        "validation_results": validation_results,
+        "webin_username": username,
+        "webin_password": password,
+        "mode": env,
+        "update_existing": action == "update",
     }
 
     try:
-        r = requests.post(url, json=body, timeout=180)
-        if not r.ok:
-            msg = html.Span(f"Submission failed [{r.status_code}]: {r.text}",
-                            style={"color": "#c62828", "fontWeight": 500})
-            return msg, task_id, room_id
-        result = r.json() if r.content else {}
-        shown_id = result.get("id") or result.get("task_id") or task_id
-        msg = html.Span(f"Submission started (Task ID: {shown_id}). Tracking…",
-                        style={"color": "#388e3c", "fontWeight": 500})
-        return msg, task_id, room_id
-    except Exception as e:
-        msg = html.Span(f"Submission error: {e}", style={"color": "#c62828", "fontWeight": 500})
-        return msg, task_id, room_id
+        url = f"{BACKEND_API_URL}/submit-to-biosamples"
+        r = requests.post(url, json=body, timeout=600)
 
-
-@app.callback(
-    [Output("submission-status", "data"),
-     Output("biosamples-results-table", "children")],
-    Input("submission-poller", "n_intervals"),
-    [State("submission-job-id", "data"),
-     State("submission-env", "data"),
-     State("submission-poller", "disabled")],
-)
-def _poll_status(_tick, job_id, env, disabled):
-    if disabled or not job_id:
-        raise PreventUpdate
-    env = env or "test"
-    try:
-        r = requests.get(f"{BACKEND_API_URL}/submission/status/{job_id}", params={"mode": env}, timeout=30)
         if not r.ok:
-            raise Exception(r.text)
-        st = r.json()
-        status = st.get("status")
-        rows = st.get("results") or []
-        if not rows:
-            table = html.Div("No results yet.") if status in ("DONE", "ERROR") else dash.no_update
-        else:
-            data = [{"Sample Name": r.get("name") or r.get("Sample Name"),
-                     "BioSample ID": r.get("biosample_accession") or r.get("BioSample ID")} for r in rows]
-            for d in data:
-                acc = d.get("BioSample ID")
+            msg = html.Span(
+                f"Submission failed [{r.status_code}]: {r.text}",
+                style={"color": "#c62828", "fontWeight": 500},
+            )
+            return msg, dash.no_update
+
+        data = r.json() if r.content else {}
+
+        success = data.get("success", False)
+        message = data.get("message", "No message from server")
+        submitted_count = data.get("submitted_count")
+        errors = data.get("errors") or []
+        biosamples_ids = data.get("biosamples_ids") or {}
+
+        color = "#388e3c" if success else "#c62828"
+
+        msg_children = [html.Span(message, style={"fontWeight": 500})]
+        if submitted_count is not None:
+            msg_children += [
+                html.Br(),
+                html.Span(f"Submitted samples: {submitted_count}"),
+            ]
+        if errors:
+            msg_children += [
+                html.Br(),
+                html.Ul(
+                    [html.Li(e) for e in errors],
+                    style={"marginTop": "6px", "color": "#c62828"},
+                ),
+            ]
+
+        msg = html.Div(msg_children, style={"color": color})
+
+        if biosamples_ids:
+            table_data = [
+                {"Sample Name": name, "BioSample ID": acc}
+                for name, acc in biosamples_ids.items()
+            ]
+
+            for row in table_data:
+                acc = row.get("BioSample ID")
                 if acc:
-                    d["BioSample ID"] = f"[{acc}](https://www.ebi.ac.uk/biosamples/samples/{acc})"
+                    row[
+                        "BioSample ID"
+                    ] = f"[{acc}](https://www.ebi.ac.uk/biosamples/samples/{acc})"
+
             table = dash_table.DataTable(
-                data=data,
-                columns=[{"name": "Sample Name", "id": "Sample Name"},
-                         {"name": "BioSample ID", "id": "BioSample ID", "presentation": "markdown"}],
+                data=table_data,
+                columns=[
+                    {"name": "Sample Name", "id": "Sample Name"},
+                    {
+                        "name": "BioSample ID",
+                        "id": "BioSample ID",
+                        "presentation": "markdown",
+                    },
+                ],
                 page_size=10,
                 style_table={"overflowX": "auto"},
                 style_cell={"textAlign": "left"},
             )
-        return st, table
+        else:
+            table = html.Div(
+                "No BioSample accessions returned.",
+                style={"marginTop": "8px", "color": "#555"},
+            )
+
+        return msg, table
+
     except Exception as e:
-        return {"status": "ERROR", "message": str(e)}, html.Div(f"Status error: {e}", style={"color": "#c62828"})
-
-
-@app.callback(
-    Output("submission-poller", "disabled"),
-    [Input("submission-job-id", "data"),
-     Input("submission-status", "data")]
-)
-def _control_poller(job_id, status):
-    if not job_id:
-        return True
-    st = (status or {}).get("status")
-    if st in (None, "PENDING", "RUNNING"):
-        return False
-    return True
+        msg = html.Span(
+            f"Submission error: {e}",
+            style={"color": "#c62828", "fontWeight": 500},
+        )
+        return msg, dash.no_update
 
 
 @app.callback(
@@ -1705,9 +1696,9 @@ app.clientside_callback(
         return '';
     }
     """,
-    Output('dummy-output-for-reset', 'children'),
-    [Input('reset-button', 'n_clicks')],
-    prevent_initial_call=True
+    Output("dummy-output-for-reset", "children"),
+    [Input("reset-button", "n_clicks")],
+    prevent_initial_call=True,
 )
 
 # Clientside callback to style tab labels when validation results are updated
@@ -1788,6 +1779,9 @@ app.clientside_callback(
     [Input('stored-json-validation-results', 'data')],
     prevent_initial_call='initial_duplicate'
 )
+
+
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8050))
