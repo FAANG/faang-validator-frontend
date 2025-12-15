@@ -6,3 +6,6 @@ dash-table
 pandas
 gunicorn
 xlsxwriter
+openpyxl==3.1.5
+packaging==25.0
+pandas==2.3.3
