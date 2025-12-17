@@ -113,21 +113,20 @@ def build_json_data(headers: List[str], rows: List[List[str]]) -> List[Dict[str,
         while i < len(headers):
             col = headers[i]
             val = row[i] if i < len(row) else ""
-            
+
             # Convert val to string, handling NaN and None
             if pd.isna(val) or val is None:
                 val = ""
             else:
                 val = str(val).strip()
 
-            # ✅ Special handling if Health Status is in headers
             if has_health_status and col.startswith("Health Status"):
                 # Skip if this header also contains "Term Source ID" (it's a processed header from process_headers)
                 # In that case, it was already handled when we processed the previous "Health Status" column
                 if "Term Source ID" in col:
                     i += 1
                     continue
-                
+
                 # Check next column for Term Source ID
                 if i + 1 < len(headers) and "Term Source ID" in headers[i + 1]:
                     term_val = row[i + 1] if i + 1 < len(row) else ""
@@ -152,7 +151,6 @@ def build_json_data(headers: List[str], rows: List[List[str]]) -> List[Dict[str,
                     i += 1
                 continue
 
-            # ✅ Special handling if Cell Type is in headers
             if has_cell_type and col.startswith("Cell Type"):
                 # Check next column for Term Source ID
                 if i + 1 < len(headers) and "Term Source ID" in headers[i + 1]:
@@ -176,28 +174,24 @@ def build_json_data(headers: List[str], rows: List[List[str]]) -> List[Dict[str,
                     i += 1
                 continue
 
-            # ✅ Special handling for Child Of headers
             elif has_child_of and col.startswith("Child Of"):
                 if val:  # Only append non-empty values
                     record["Child Of"].append(val)
                 i += 1
                 continue
 
-            # ✅ Special handling for Specimen Picture URL headers
             elif has_specimen_picture_url and col.startswith("Specimen Picture URL"):
                 if val:  # Only append non-empty values
                     record["Specimen Picture URL"].append(val)
                 i += 1
                 continue
 
-            # ✅ Special handling for Derived From headers
             elif has_derived_from and col.startswith("Derived From"):
                 if val:  # Only append non-empty values
                     record["Derived From"].append(val)
                 i += 1
                 continue
 
-            # ✅ Normal processing for all other columns
             if col in record:
                 if not isinstance(record[col], list):
                     record[col] = [record[col]]
@@ -859,6 +853,7 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
     prevent_initial_call=True
 )
 def download_annotated_xlsx(n_clicks, validation_results):
+
     if not n_clicks or not validation_results or 'results' not in validation_results:
         raise PreventUpdate
 
@@ -868,16 +863,40 @@ def download_annotated_xlsx(n_clicks, validation_results):
 
     excel_sheets = {}
 
+    def _pick_lists_from_st_data(st_data: dict):
+        valid_key = None
+        invalid_key = None
+        valid_list = []
+        invalid_list = []
+
+        for k, v in (st_data or {}).items():
+            if isinstance(v, list) and k.startswith("valid_") and valid_key is None:
+                valid_key = k
+                valid_list = v
+            if isinstance(v, list) and k.startswith("invalid_") and invalid_key is None:
+                invalid_key = k
+                invalid_list = v
+
+        return valid_key, invalid_key, valid_list or [], invalid_list or []
+
+    def _print_be_columns(sample_type: str, valid_list: list, invalid_list: list):
+        first = None
+        src = None
+        if valid_list:
+            first = valid_list[0]
+            src = "valid_list[0]"
+        elif invalid_list:
+            first = invalid_list[0]
+            src = "invalid_list[0]"
+
     for sample_type in sample_types:
         st_data = results_by_type.get(sample_type, {}) or {}
-        st_key = sample_type.replace(' ', '_')
 
-        invalid_key = f"invalid_{st_key}s"
-        if invalid_key.endswith('ss'):
-            invalid_key = invalid_key[:-1]
-        valid_key = f"valid_{st_key}s"
+        valid_key, invalid_key, valid_list, invalid_list = _pick_lists_from_st_data(st_data)
 
-        invalid_rows_full = _flatten_data_rows(st_data.get(invalid_key), include_errors=True) or []
+        _print_be_columns(sample_type, valid_list, invalid_list)
+
+        invalid_rows_full = _flatten_data_rows(invalid_list, include_errors=True) or []
         rows_for_df_err = []
         for r in invalid_rows_full:
             rc = r.copy()
@@ -886,7 +905,7 @@ def download_annotated_xlsx(n_clicks, validation_results):
             rows_for_df_err.append(rc)
         df_err = _df(rows_for_df_err)
 
-        valid_rows_full = _flatten_data_rows(st_data.get(valid_key)) or []
+        valid_rows_full = _flatten_data_rows(valid_list) or []
         warning_rows_full = [r for r in valid_rows_full if r.get('warnings')]
         rows_for_df_warn = []
         for r in warning_rows_full:
@@ -895,10 +914,27 @@ def download_annotated_xlsx(n_clicks, validation_results):
             rows_for_df_warn.append(rc)
         df_warn = _df(rows_for_df_warn)
 
+        st_key = str(sample_type).replace(" ", "_")
+
         if not df_err.empty:
-            excel_sheets[f"{st_key[:25]}_errors"] = {"df": df_err, "rows": invalid_rows_full, "mode": "error"}
+            excel_sheets[f"{st_key[:25]}"] = {"df": df_err, "rows": invalid_rows_full, "mode": "error"}
+
         if not df_warn.empty:
-            excel_sheets[f"{st_key[:24]}_warnings"] = {"df": df_warn, "rows": warning_rows_full, "mode": "warn"}
+            excel_sheets[f"{st_key[:24]}"] = {"df": df_warn, "rows": warning_rows_full, "mode": "warn"}
+
+        if df_err.empty and df_warn.empty:
+            rows_for_df_all = []
+            for r in valid_rows_full:
+                rc = r.copy()
+                rc.pop('errors', None)
+                rc.pop('warnings', None)
+                rows_for_df_all.append(rc)
+
+            df_all = _df(rows_for_df_all)
+            if not df_all.empty:
+                excel_sheets[f"{st_key[:28]}"] = {"df": df_all, "rows": valid_rows_full, "mode": "all"}
+            else:
+                print(f"[{sample_type}] df_all is empty (no rows to export)")
 
     if not excel_sheets:
         raise PreventUpdate
@@ -912,22 +948,25 @@ def download_annotated_xlsx(n_clicks, validation_results):
         book = writer.book
         fmt_red = book.add_format({"bg_color": "#FFCCCC"})
         fmt_yellow = book.add_format({"bg_color": "#FFF4CC"})
-
         comment_opts = {"visible": False, "x_scale": 1.5, "y_scale": 1.8}
 
         def _short(kind, field, msgs):
             return (f"{kind}: {field} — " + " | ".join(str(m) for m in msgs)).replace(" | ", "\n• ")
 
         def _add_prompt(ws, r, c, title, full_text):
-            ws.data_validation(r, c, r, c,
-                               {"validate": "any", "input_title": title[:32], "input_message": full_text[:3000],
-                                "show_input": True})
+            ws.data_validation(
+                r, c, r, c,
+                {"validate": "any", "input_title": title[:32], "input_message": full_text[:3000], "show_input": True}
+            )
 
         for sheet_name, payload in excel_sheets.items():
+            mode = payload["mode"]
+            if mode not in ("error", "warn"):
+                continue
+
             ws = writer.sheets[sheet_name[:31]]
             df = payload["df"]
             cols = list(df.columns)
-            mode = payload["mode"]
             rows_full = payload["rows"]
 
             for i, raw in enumerate(rows_full, start=1):
@@ -938,10 +977,10 @@ def download_annotated_xlsx(n_clicks, validation_results):
 
                     for field, msgs in (row_err or {}).items():
                         col_name = _resolve_col(field, cols)
-                        if not col_name:
+                        if not col_name or col_name not in cols:
                             continue
-                        c = cols.index(col_name)
 
+                        c = cols.index(col_name)
                         value = df.iat[i - 1, c] if (i - 1) < len(df) else ""
                         msgs_list = msgs if isinstance(msgs, list) else [msgs]
                         only_extra = all("extra inputs are not permitted" in str(m).lower() for m in msgs_list)
@@ -964,8 +1003,9 @@ def download_annotated_xlsx(n_clicks, validation_results):
                     by_field = _warnings_by_field(raw.get("warnings", []))
                     for field, msgs in (by_field or {}).items():
                         col_name = _resolve_col(field, cols)
-                        if not col_name:
+                        if not col_name or col_name not in cols:
                             continue
+
                         c = cols.index(col_name)
                         value = df.iat[i - 1, c] if (i - 1) < len(df) else ""
                         ws.write(i, c, value, fmt_yellow)
@@ -1464,6 +1504,7 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict, all_sheets_d
 
     return html.Div(blocks)
 
+
 @app.callback(
     Output("biosamples-form-mount", "children"),
     Input("stored-json-validation-results", "data"),
@@ -1646,7 +1687,7 @@ def _submit_to_biosamples(n, username, password, env, action, v):
                 if acc:
                     row[
                         "BioSample ID"
-                    ] = f"[{acc}](https://www.ebi.ac.uk/biosamples/samples/{acc})"
+                    ] = f"[{acc}](https://wwwdev.ebi.ac.uk/biosamples/samples/{acc})"
 
             table = dash_table.DataTable(
                 data=table_data,
@@ -1779,8 +1820,6 @@ app.clientside_callback(
     [Input('stored-json-validation-results', 'data')],
     prevent_initial_call='initial_duplicate'
 )
-
-
 
 
 if __name__ == '__main__':
