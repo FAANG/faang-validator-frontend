@@ -65,6 +65,18 @@ body {
     color: #555;
 }
 
+#file-chosen-text-experiments {
+    margin-left: 10px;
+    font-size: 14px;
+    color: #555;
+}
+
+#file-chosen-text-analysis {
+    margin-left: 10px;
+    font-size: 14px;
+    color: #555;
+}
+
 /* Selected file display styling */
 #selected-file-display {
     margin: 10px 0;
