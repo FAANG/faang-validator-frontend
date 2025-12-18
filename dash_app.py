@@ -1,3 +1,4 @@
+import json
 import os
 import base64
 import io
@@ -88,13 +89,15 @@ def build_json_data(headers: List[str], rows: List[List[str]]) -> List[Dict[str,
     Build JSON structure from processed headers and rows.
     Only include 'Health Status' if it exists in the headers.
     Always treat 'Child Of', 'Specimen Picture URL', and 'Derived From' as lists.
+    Uses processed headers (from process_headers) which may rename duplicates.
     """
     grouped_data = []
-    has_health_status = any(h.startswith("Health Status") for h in headers)
-    has_cell_type = any(h.startswith("Cell Type") for h in headers)
-    has_child_of = any(h == "Child Of" for h in headers)
-    has_specimen_picture_url = any(h == "Specimen Picture URL" for h in headers)
-    has_derived_from = any(h == "Derived From" for h in headers)
+    # Check if fields exist in processed headers (may be renamed for duplicates)
+    has_health_status = any("Health Status" in h for h in headers)
+    has_cell_type = any("Cell Type" in h for h in headers)
+    has_child_of = any("Child Of" in h for h in headers)
+    has_specimen_picture_url = any("Specimen Picture URL" in h for h in headers)
+    has_derived_from = any("Derived From" in h for h in headers)
 
     for row in rows:
         record: Dict[str, Any] = {}
@@ -111,7 +114,7 @@ def build_json_data(headers: List[str], rows: List[List[str]]) -> List[Dict[str,
 
         i = 0
         while i < len(headers):
-            col = headers[i]
+            col = headers[i]  # Processed header
             val = row[i] if i < len(row) else ""
             
             # Convert val to string, handling NaN and None
@@ -121,14 +124,9 @@ def build_json_data(headers: List[str], rows: List[List[str]]) -> List[Dict[str,
                 val = str(val).strip()
 
             # ✅ Special handling if Health Status is in headers
-            if has_health_status and col.startswith("Health Status"):
-                # Skip if this header also contains "Term Source ID" (it's a processed header from process_headers)
-                # In that case, it was already handled when we processed the previous "Health Status" column
-                if "Term Source ID" in col:
-                    i += 1
-                    continue
-                
-                # Check next column for Term Source ID
+            # Check if "Health Status" appears in the column name (handles renamed duplicates)
+            if has_health_status and "Health Status" in col:
+                # Check next column for Term Source ID (may also be renamed)
                 if i + 1 < len(headers) and "Term Source ID" in headers[i + 1]:
                     term_val = row[i + 1] if i + 1 < len(row) else ""
                     if pd.isna(term_val) or term_val is None:
@@ -136,10 +134,9 @@ def build_json_data(headers: List[str], rows: List[List[str]]) -> List[Dict[str,
                     else:
                         term_val = str(term_val).strip()
 
-                    # Ensure we're using the correct values: val should be text, term_val should be term
                     record["Health Status"].append({
-                        "text": val,  # Current column value is the health status text
-                        "term": term_val  # Next column value is the term source ID
+                        "text": val,
+                        "term": term_val
                     })
                     i += 2  # Skip both Health Status and Term Source ID columns
                 else:
@@ -153,8 +150,9 @@ def build_json_data(headers: List[str], rows: List[List[str]]) -> List[Dict[str,
                 continue
 
             # ✅ Special handling if Cell Type is in headers
-            if has_cell_type and col.startswith("Cell Type"):
-                # Check next column for Term Source ID
+            # Check if "Cell Type" appears in the column name (handles renamed duplicates)
+            if has_cell_type and "Cell Type" in col:
+                # Check next column for Term Source ID (may also be renamed)
                 if i + 1 < len(headers) and "Term Source ID" in headers[i + 1]:
                     term_val = row[i + 1] if i + 1 < len(row) else ""
                     if pd.isna(term_val) or term_val is None:
@@ -175,23 +173,26 @@ def build_json_data(headers: List[str], rows: List[List[str]]) -> List[Dict[str,
                         })
                     i += 1
                 continue
-
+            
             # ✅ Special handling for Child Of headers
-            elif has_child_of and col.startswith("Child Of"):
+            # Check if "Child Of" appears in the column name (handles renamed duplicates)
+            elif has_child_of and "Child Of" in col:
                 if val:  # Only append non-empty values
                     record["Child Of"].append(val)
                 i += 1
                 continue
 
             # ✅ Special handling for Specimen Picture URL headers
-            elif has_specimen_picture_url and col.startswith("Specimen Picture URL"):
+            # Check if "Specimen Picture URL" appears in the column name (handles renamed duplicates)
+            elif has_specimen_picture_url and "Specimen Picture URL" in col:
                 if val:  # Only append non-empty values
                     record["Specimen Picture URL"].append(val)
                 i += 1
                 continue
 
             # ✅ Special handling for Derived From headers
-            elif has_derived_from and col.startswith("Derived From"):
+            # Check if "Derived From" appears in the column name (handles renamed duplicates)
+            elif has_derived_from and "Derived From" in col:
                 if val:  # Only append non-empty values
                     record["Derived From"].append(val)
                 i += 1
@@ -305,6 +306,23 @@ def _valid_invalid_counts(v):
         return 0, 0
 
 
+def _count_total_warnings(v):
+    """Count total number of records with warnings across all sample types."""
+    try:
+        validation_data = v.get("results", {}) or {}
+        results_by_type = validation_data.get("results_by_type", {}) or {}
+        sample_types = validation_data.get("sample_types_processed", []) or []
+        
+        total_warnings = 0
+        for sample_type in sample_types:
+            warning_count = _count_warnings_for_type(v, sample_type)
+            total_warnings += warning_count
+        
+        return total_warnings
+    except Exception:
+        return 0
+
+
 def _count_valid_invalid_for_type(validation_results_dict, sample_type):
     try:
         validation_data = validation_results_dict.get('results', {}) or {}
@@ -322,6 +340,29 @@ def _count_valid_invalid_for_type(validation_results_dict, sample_type):
         return v, iv
     except Exception:
         return 0, 0
+
+
+def _count_warnings_for_type(validation_results_dict, sample_type):
+    """Count the number of valid records with warnings for a sample type."""
+    try:
+        validation_data = validation_results_dict.get('results', {}) or {}
+        results_by_type = validation_data.get('results_by_type', {}) or {}
+        st_data = results_by_type.get(sample_type, {}) or {}
+        st_key = sample_type.replace(' ', '_')
+
+        valid_key = f"valid_{st_key}s"
+        valid_records = st_data.get(valid_key) or []
+        
+        # Count records that have warnings
+        warning_count = 0
+        for record in valid_records:
+            warnings = record.get('warnings', [])
+            if warnings and len(warnings) > 0:
+                warning_count += 1
+        
+        return warning_count
+    except Exception:
+        return 0
 
 
 def biosamples_form():
@@ -622,10 +663,11 @@ def store_file_data(contents, filename):
             all_sheets_data[sheet] = sheet_records
             
             # Convert to JSON format for backend using build_json_data rules
-            # First, get original headers
+            # Use ORIGINAL headers for JSON building (not processed headers)
+            # Processed headers are only for display purposes
             original_headers = [str(col) for col in df_sheet.columns]
             
-            # Process headers according to duplicate rules
+            # Process headers according to duplicate rules (for display only)
             processed_headers = process_headers(original_headers)
             
             # Prepare rows data
@@ -634,7 +676,8 @@ def store_file_data(contents, filename):
                 row_list = [row[col] for col in df_sheet.columns]
                 rows.append(row_list)
             
-            # Apply build_json_data rules with processed headers
+            # Apply build_json_data rules with processed headers (as per original rules)
+            # Processed headers handle duplicates correctly (renaming them)
             parsed_json_records = build_json_data(processed_headers, rows)
             parsed_json_data[sheet] = parsed_json_records
             sheets_with_data.append(sheet)
@@ -724,17 +767,18 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
     records = []
     valid_count = 0
     invalid_count = 0
+
     all_sheets_validation_data = {}
     json_validation_results = None
-
+    print(json.dumps(parsed_json))
     try:
         try:
-
             response = requests.post(
                 f'{BACKEND_API_URL}/validate-data',
                 json={"data": parsed_json},
                 headers={'accept': 'application/json', 'Content-Type': 'application/json'}
             )
+
             if response.status_code != 200:
                 raise Exception(f"JSON endpoint returned {response.status_code}")
         except Exception as json_err:
@@ -742,6 +786,7 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
             print(f"JSON endpoint failed: {json_err}")
         if response.status_code == 200:
             response_json = response.json()
+            print(json.dumps(response_json))
         else:
             raise Exception(f"Error {response.status_code}: {response.text}")
 
@@ -762,7 +807,7 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
             if not all_sheets_validation_data and sheet_names:
                 first_sheet = sheet_names[0]
                 all_sheets_validation_data = {first_sheet: records}
-
+            print(json.loads(response_json))
     except Exception as e:
         error_div = html.Div([
             html.H5(filename),
@@ -998,13 +1043,21 @@ def populate_validation_results_tabs(validation_results):
     sample_types_with_data = []
     
     for sample_type in sample_types:
+        # Count valid and invalid records for THIS specific sample type only
         v, iv = _count_valid_invalid_for_type(validation_results, sample_type)
-        # Only include tabs that have data (valid or invalid samples)
-        if v > 0 or iv > 0:
+        warning_count = _count_warnings_for_type(validation_results, sample_type)
+        
+        # Show tabs that have errors (invalid records) OR warnings (valid records with warnings)
+        has_errors = iv > 0
+        has_warnings = warning_count > 0
+        
+        if has_errors or has_warnings:
             sample_types_with_data.append(sample_type)
-            # Create label as string (dcc.Tab only accepts strings for label)
-            # We'll use JavaScript to add colors after rendering
+            # Create label showing counts for THIS tab only (per sample type)
+            # Format: "Sample Type (X valid / Y invalid)"
+            # Warnings are shown in the table with yellow highlighting
             label = f"{sample_type.capitalize()} ({v} valid / {iv} invalid)"
+            
             sample_type_tabs.append(
                 dcc.Tab(
                     label=label,
@@ -1038,7 +1091,7 @@ def populate_validation_results_tabs(validation_results):
 
     if not sample_type_tabs:
         return html.Div([
-            html.P("No validation data available.", style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
+            html.P("The provided data has been validated successfully with no errors or warnings. You may proceed with submission.", style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
         ])
 
     tabs = dcc.Tabs(
@@ -1380,6 +1433,99 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict, all_sheets_d
     if df_all.empty:
         return html.Div([html.H4("No data available", style={'textAlign': 'center', 'margin': '10px 0'})])
 
+    # Helper to map backend field names (including nested like "Health Status.0.term")
+    # to actual DataFrame columns based on Excel headers
+    def _map_field_to_column(field_name, columns):
+        if not field_name:
+            return None
+
+        # 1) Special‑case for Health Status term errors:
+        #    Health Status.0.term → Term Source ID column that comes immediately after the 1st Health Status column
+        #    Health Status.1.term → Term Source ID column that comes immediately after the 2nd Health Status column
+        if field_name.startswith("Health Status") and ".term" in field_name:
+            try:
+                parts = field_name.split(".")
+                idx = int(parts[1])
+            except Exception:
+                idx = 0
+
+            # Helper to clean column name (remove .1, .2 suffixes)
+            def _clean_col_name(col):
+                col_str = str(col)
+                if '.' in col_str:
+                    return col_str.split('.')[0]
+                return col_str
+            
+            # Find all Health Status columns in order
+            health_status_cols = []
+            for i, col in enumerate(columns):
+                col_str = str(col)
+                # Check if this is a Health Status column (may have .1, .2 suffixes)
+                # But not a Term Source ID column that contains "Health Status" in its name
+                if "Health Status" in col_str and "Term Source ID" not in col_str:
+                    health_status_cols.append((i, col))
+            
+            # For each Health Status column, find the Term Source ID column immediately after it
+            term_cols_after_health_status = []
+            for hs_idx, hs_col in health_status_cols:
+                # Check if the next column is a generic Term Source ID (exactly "Term Source ID", not "Breed Term Source ID", etc.)
+                next_idx = hs_idx + 1
+                if next_idx < len(columns):
+                    next_col = columns[next_idx]
+                    cleaned_next = _clean_col_name(next_col)
+                    # Check if it's exactly "Term Source ID" (not "Breed Term Source ID", "Sex Term Source ID", etc.)
+                    if cleaned_next == "Term Source ID":
+                        term_cols_after_health_status.append(next_col)
+            
+            # Map the index to the corresponding Term Source ID column
+            if term_cols_after_health_status:
+                if 0 <= idx < len(term_cols_after_health_status):
+                    return term_cols_after_health_status[idx]
+                # Fallback: if index is out of range, use the last one
+                return term_cols_after_health_status[-1]
+
+        # 2) Try direct match (case-insensitive) e.g. "Breed", "Breed Term Source ID"
+        direct = _resolve_col(field_name, columns)
+        if direct:
+            return direct
+
+        # 2.5) Special handling for generic "Term Source ID" - match columns that are exactly "Term Source ID"
+        # or "Term Source ID.1", "Term Source ID.2", etc. (but NOT "Breed Term Source ID" or other specific ones)
+        if field_name == "Term Source ID" or field_name.lower() == "term source id":
+            # First, try exact match
+            for col in columns:
+                col_str = str(col)
+                if col_str.lower() == "term source id":
+                    return col
+            
+            # Then try matching "Term Source ID.1", "Term Source ID.2", etc.
+            # These are generic Term Source ID columns (not specific like "Breed Term Source ID")
+            for col in columns:
+                col_str = str(col)
+                col_lower = col_str.lower()
+                
+                # Match pattern: "Term Source ID" followed by a dot and a number
+                # e.g., "Term Source ID.1", "Term Source ID.2"
+                if col_lower.startswith("term source id."):
+                    # Extract the suffix after "term source id."
+                    suffix = col_lower[len("term source id."):].strip()
+                    # Check if suffix is just a number (like "1", "2")
+                    if suffix and suffix.isdigit():
+                        # Verify the column name starts with "Term Source ID" (not preceded by other words)
+                        # This excludes "Breed Term Source ID.1" or "Sex Term Source ID.2"
+                        if col_str[:len("Term Source ID")].lower() == "term source id":
+                            return col
+
+        # 3) If field has dot notation (e.g. "Health Status.0.term"),
+        #    try using only the base name before the first dot
+        if "." in field_name:
+            base = field_name.split(".", 1)[0]
+            base_match = _resolve_col(base, columns)
+            if base_match:
+                return base_match
+
+        return None
+
     # Build cell styles and tooltips for all rows
     cell_styles = []
     tooltip_data = []
@@ -1392,34 +1538,83 @@ def make_sample_type_panel(sample_type: str, results_by_type: dict, all_sheets_d
 
         # Check for errors
         if sample_name in error_map:
-            field_errors = error_map[sample_name]
-            for field, msgs in (field_errors or {}).items():
-                col = _resolve_col(field, df_all.columns)
+            field_errors = error_map[sample_name] or {}
+            for field, msgs in field_errors.items():
+                col = _map_field_to_column(field, df_all.columns)
                 if not col:
                     continue
+                
+                # Ensure the column exists in the DataFrame (use exact column from DataFrame)
+                if col not in df_all.columns:
+                    # Try to find by string matching
+                    col_str = str(col)
+                    found_col = None
+                    for df_col in df_all.columns:
+                        if str(df_col) == col_str:
+                            found_col = df_col
+                            break
+                    if not found_col:
+                        continue
+                    col = found_col
+                
                 msgs_list = _as_list(msgs)
-                is_extra = any("extra inputs are not permitted" in m.lower() for m in msgs_list)
+                lower_msgs = [m.lower() for m in msgs_list]
+                # Treat ontology / other warnings that arrive inside "errors" as warnings for styling
+                is_extra = any("extra inputs are not permitted" in lm for lm in lower_msgs)
+                is_warning_like = any("warning" in lm for lm in lower_msgs)
 
-                if is_extra:
+                # Build this field's message text (include full field name like "Health Status.1.term")
+                prefix = "**Warning**: " if (is_extra or is_warning_like) else "**Error**: "
+                msg_text = prefix + field + " — " + " | ".join(msgs_list)
+
+                # If there's already a tooltip for this column, append with a separator
+                if col in tips:
+                    existing = tips[col].get("value", "")
+                    combined = f"{existing} | {msg_text}" if existing else msg_text
+                else:
+                    combined = msg_text
+
+                if is_extra or is_warning_like:
                     row_styles.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#fff4cc'})
-                    tips[col] = {'value': f"**Warning**: {field} — " + " | ".join(msgs_list), 'type': 'markdown'}
+                    tips[col] = {'value': combined, 'type': 'markdown'}
                 else:
                     row_styles.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#ffcccc'})
-                    tips[col] = {'value': f"**Error**: {field} — " + " | ".join(msgs_list), 'type': 'markdown'}
+                    tips[col] = {'value': combined, 'type': 'markdown'}
                     cols_with_real_errors.add(col)
 
         # Check for warnings
         if sample_name in warning_map:
-            field_warnings = warning_map[sample_name]
-            for field, msgs in (field_warnings or {}).items():
-                col = _resolve_col(field, df_all.columns)
+            field_warnings = warning_map[sample_name] or {}
+            for field, msgs in field_warnings.items():
+                col = _map_field_to_column(field, df_all.columns)
                 if not col:
                     continue
+                
+                # Ensure the column exists in the DataFrame (use exact column from DataFrame)
+                if col not in df_all.columns:
+                    # Try to find by string matching
+                    col_str = str(col)
+                    found_col = None
+                    for df_col in df_all.columns:
+                        if str(df_col) == col_str:
+                            found_col = df_col
+                            break
+                    if not found_col:
+                        continue
+                    col = found_col
+                
                 # Only add warning style if not already styled by error
                 if not any(s.get('column_id') == col for s in row_styles):
                     row_styles.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#fff4cc'})
-                if col not in tips:
-                    tips[col] = {'value': f"**Warning**: {field} — " + " | ".join(map(str, msgs)), 'type': 'markdown'}
+
+                # Build warning text and append if a tooltip already exists
+                warn_text = f"**Warning**: {field} — " + " | ".join(map(str, msgs))
+                if col in tips:
+                    existing = tips[col].get("value", "")
+                    combined = f"{existing} | {warn_text}" if existing else warn_text
+                else:
+                    combined = warn_text
+                tips[col] = {'value': combined, 'type': 'markdown'}
 
         cell_styles.extend(row_styles)
         tooltip_data.append(tips)
@@ -1515,18 +1710,29 @@ def _toggle_biosamples_form(v):
         "marginBottom": "12px",
         "fontWeight": 500,
     }
-    if valid_cnt > 0:
+    # Count total warnings across all sample types
+    total_warnings = _count_total_warnings(v)
+    
+    # Only show submit panel if all data is valid (no errors AND no warnings)
+    if invalid_cnt == 0 and total_warnings == 0 and valid_cnt > 0:
         msg_children = [
             html.Span(
-                f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s)."
+                f"Validation result: {valid_cnt} valid sample(s). All data is valid with no errors or warnings. You may proceed with submission."
             ),
             html.Br(),
         ]
         return base_style, msg_children, style_ok
     else:
+        # Hide submit panel if there are errors or warnings
+        if invalid_cnt > 0:
+            msg = f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s). Please fix errors before submitting."
+        elif total_warnings > 0:
+            msg = f"Validation result: {valid_cnt} valid sample(s) with {total_warnings} warning(s). Please review and fix warnings before submitting."
+        else:
+            msg = f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s). No valid samples to submit."
         return (
-            base_style,
-            f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s). No valid samples to submit.",
+            {"display": "none"},
+            msg,
             style_warn,
         )
 
@@ -1542,9 +1748,16 @@ def _toggle_biosamples_form(v):
 def _disable_submit(u, p, v):
     if not v or "results" not in v:
         return True
-    valid_cnt, _ = _valid_invalid_counts(v)
+    valid_cnt, invalid_cnt = _valid_invalid_counts(v)
+    total_warnings = _count_total_warnings(v)
+    
+    # Disable if no valid samples, or if there are errors or warnings
     if valid_cnt == 0:
         return True
+    if invalid_cnt > 0 or total_warnings > 0:
+        return True
+    
+    # Enable only if username and password are filled
     return not (u and p)
 
 
