@@ -2,6 +2,7 @@ import json
 import os
 import base64
 import io
+import re
 import dash
 import requests
 from uuid import uuid4
@@ -50,7 +51,7 @@ app.index_string = '''
         </footer>
     </body>
 </html>
-'''
+'''''
 
 
 def process_headers(headers: List[str]) -> List[str]:
@@ -212,11 +213,70 @@ def build_json_data(headers: List[str], rows: List[List[str]]) -> List[Dict[str,
     return grouped_data
 
 
+def get_all_errors_and_warnings(record):
+    errors = {}
+    warnings = {}
+
+    # From 'errors' object
+    if 'errors' in record and record['errors']:
+        if 'field_errors' in record['errors']:
+            for field, messages in record['errors']['field_errors'].items():
+                errors[field] = messages
+        if 'relationship_errors' in record['errors']:
+            for message in record['errors']['relationship_errors']:
+                field_to_blame = 'general'
+                data = record.get('data', {})
+                if 'Child Of' in data and data.get('Child Of'):
+                    field_to_blame = 'Child Of'
+                elif 'Derived From' in data and data.get('Derived From'):
+                    field_to_blame = 'Derived From'
+                
+                if field_to_blame not in errors:
+                    errors[field_to_blame] = []
+                errors[field_to_blame].append(message)
+
+
+    # From 'field_warnings'
+    if 'field_warnings' in record and record['field_warnings']:
+        for field, messages in record['field_warnings'].items():
+            warnings[field] = messages
+
+    # From 'ontology_warnings'
+    if 'ontology_warnings' in record and record['ontology_warnings']:
+        for message in record['ontology_warnings']:
+            match = re.search(r"in field '([^']*)'", message)
+            if match:
+                field = match.group(1)
+                if field not in warnings:
+                    warnings[field] = []
+                warnings[field].append(message)
+            else:
+                # Generic warning if field not found
+                if 'general' not in warnings:
+                    warnings['general'] = []
+                warnings['general'].append(message)
+
+    # From 'relationship_errors'
+    if 'relationship_errors' in record and record['relationship_errors']:
+        # Try to associate with 'Child Of' or 'Derived From'
+        field_to_blame = 'general'
+        data = record.get('data', {})
+        if 'Child Of' in data and data.get('Child Of'):
+            field_to_blame = 'Child Of'
+        elif 'Derived From' in data and data.get('Derived From'):
+            field_to_blame = 'Derived From'
+
+        if field_to_blame not in warnings:
+            warnings[field_to_blame] = []
+        warnings[field_to_blame].extend(record['relationship_errors'])
+
+    return errors, warnings
+
+
 def _warnings_by_field(warnings_list):
-    import re
     by_field = {}
     for w in warnings_list or []:
-        m = re.search(r"Field '([^']+)'", str(w))
+        m = re.search(r"Field '([^']*)'", str(w))
         field = m.group(1) if m else None
         by_field.setdefault(field, []).append(str(w))
     return by_field
@@ -262,13 +322,15 @@ def _flatten_data_rows(rows, include_errors=False):
         base.update(processed_fields)
 
         if include_errors:
-            errors = r.get("errors", {})
-            if isinstance(errors, dict) and "field_errors" in errors:
-                base['errors'] = errors["field_errors"]
-
-        warnings = r.get("warnings", [])
-        if warnings:
-            base['warnings'] = warnings
+            errors, warnings = get_all_errors_and_warnings(r)
+            if errors:
+                base['errors'] = errors
+            if warnings:
+                base['warnings'] = warnings
+        else:
+            _, warnings = get_all_errors_and_warnings(r)
+            if warnings:
+                base['warnings'] = warnings
 
         flat.append(base)
     return flat
@@ -356,8 +418,8 @@ def _count_warnings_for_type(validation_results_dict, sample_type):
         # Count records that have warnings
         warning_count = 0
         for record in valid_records:
-            warnings = record.get('warnings', [])
-            if warnings and len(warnings) > 0:
+            _, warnings = get_all_errors_and_warnings(record)
+            if warnings:
                 warning_count += 1
         
         return warning_count
@@ -560,7 +622,7 @@ app.layout = html.Div([
                         html.Div(id='selected-file-display', style={'display': 'none'}),
                     ], style={'margin': '20px 0'}),
                     dcc.Loading(id="loading-validation", type="circle", children=html.Div(id='output-data-upload')),
-                    html.Div(id="biosamples-form-mount"),
+                    biosamples_form(),
                     html.Div(id="biosamples-results-table")
                 ]),
             dcc.Tab(label='Experiments', style={
@@ -687,7 +749,7 @@ def store_file_data(contents, filename):
 
         file_selected_display = html.Div([
             html.H3("File Selected", id='original-file-heading'),
-            html.P(f"File: {filename}", style={'fontWeight': 'bold'}),
+            html.P(f"File: {filename}", style={'fontWeight': 'bold'})
         ])
 
         # Display the parsed Excel data in tabs
@@ -713,7 +775,8 @@ def store_file_data(contents, filename):
             output_data_upload_children = html.Div([
                 html.Div([
                     sheet_tabs[0].children[0] if sheet_tabs else html.Div()
-                ], style={'margin': '20px 0'}),
+                ], style={'margin': '20px 0'})
+                ,
                 html.P("Click 'Validate' to send data to backend for validation.", 
                        style={'marginTop': '20px', 'fontStyle': 'italic', 'color': '#666'})
             ], style={'margin': '20px 0'})
@@ -771,6 +834,7 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
     all_sheets_validation_data = {}
     json_validation_results = None
     print(json.dumps(parsed_json))
+    print("file uploaded!!")
     try:
         try:
             response = requests.post(
@@ -786,7 +850,7 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
             print(f"JSON endpoint failed: {json_err}")
         if response.status_code == 200:
             response_json = response.json()
-            print(json.dumps(response_json))
+            # print(json.dumps(response_json))
         else:
             raise Exception(f"Error {response.status_code}: {response.text}")
 
@@ -823,13 +887,18 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
         html.H3("2. Conversion and Validation results"),
 
         html.Div([
-            html.P("Conversion Status", style={'fontWeight': 'bold'}),
-            html.P("Success", style={'color': 'green', 'fontWeight': 'bold'}),
-            html.P("Validation Status", style={'fontWeight': 'bold'}),
+            html.P("Conversion Status", style={'fontWeight': 'bold'})
+            ,
+            html.P("Success", style={'color': 'green', 'fontWeight': 'bold'})
+            ,
+            html.P("Validation Status", style={'fontWeight': 'bold'})
+            ,
             html.P("Finished", style={'color': 'green', 'fontWeight': 'bold'}),
-        ], style={'margin': '10px 0'}),
+        ], style={'margin': '10px 0'})
+        ,
 
-        html.Div(id='error-table-container', style={'display': 'none'}),
+        html.Div(id='error-table-container', style={'display': 'none'})
+        ,
         html.Div(id='validation-results-container', style={'margin': '20px 0'})
     ]
 
@@ -860,7 +929,8 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
                                 updated_c['props']['style'] = {}
                                 updated_children.append(updated_c)
                                 continue
-                            elif (isinstance(c_props.get('children'), str) and
+                            elif (
+                                  isinstance(c_props.get('children'), str) and
                                   (c_props.get('children').startswith("File:") or
                                    c_props.get('children') == "Click 'Validate' to process the file and see results.")
                             ):
@@ -900,169 +970,361 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
 @app.callback(
     Output('download-table-csv', 'data'),
     Input('download-errors-btn', 'n_clicks'),
-    State('stored-json-validation-results', 'data'),
+    [State('stored-json-validation-results', 'data'),
+     State('stored-all-sheets-data', 'data'),
+     State('stored-sheet-names', 'data')],
     prevent_initial_call=True
 )
-def download_annotated_xlsx(n_clicks, validation_results):
-    if not n_clicks or not validation_results or 'results' not in validation_results:
+def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet_names):
+    if not n_clicks:
+        raise PreventUpdate
+    
+    if not all_sheets_data or not sheet_names:
         raise PreventUpdate
 
-    validation_data = validation_results['results']
-    results_by_type = validation_data.get('results_by_type', {}) or {}
-    sample_types = validation_data.get('sample_types_processed', []) or []
+    # Build a mapping of sample names to their field-level errors/warnings
+    # Structure: {sample_name_normalized: {"errors": {field: [msgs]}, "warnings": {field: [msgs]}}}
+    sample_to_field_errors = {}
+    
+    # Helper function to map backend field names to Excel column names
+    def _map_field_to_column_excel(field_name, columns):
+        if not field_name:
+            return None
 
-    excel_sheets = {}
+        # 1) Special case for Health Status term errors
+        if field_name.startswith("Health Status") and ".term" in field_name:
+            try:
+                parts = field_name.split(".")
+                idx = int(parts[1])
+            except Exception:
+                idx = 0
 
-    for sample_type in sample_types:
-        st_data = results_by_type.get(sample_type, {}) or {}
-        st_key = sample_type.replace(' ', '_')
+            def _clean_col_name(col):
+                col_str = str(col)
+                if '.' in col_str:
+                    return col_str.split('.')[0]
+                return col_str
+            
+            # Find all Health Status columns in order
+            health_status_cols = []
+            for i, col in enumerate(columns):
+                col_str = str(col)
+                if "Health Status" in col_str and "Term Source ID" not in col_str:
+                    health_status_cols.append((i, col))
+            
+            # For each Health Status column, find the Term Source ID column immediately after it
+            term_cols_after_health_status = []
+            for hs_idx, hs_col in health_status_cols:
+                next_idx = hs_idx + 1
+                if next_idx < len(columns):
+                    next_col = columns[next_idx]
+                    cleaned_next = _clean_col_name(next_col)
+                    if cleaned_next == "Term Source ID":
+                        term_cols_after_health_status.append(next_col)
+            
+            if term_cols_after_health_status:
+                if 0 <= idx < len(term_cols_after_health_status):
+                    return term_cols_after_health_status[idx]
+                return term_cols_after_health_status[-1] if term_cols_after_health_status else None
 
-        invalid_key = f"invalid_{st_key}s"
-        if invalid_key.endswith('ss'):
-            invalid_key = invalid_key[:-1]
-        valid_key = f"valid_{st_key}s"
+        # 2) Try direct match (case-insensitive)
+        direct = _resolve_col(field_name, columns)
+        if direct:
+            return direct
 
-        invalid_rows_full = _flatten_data_rows(st_data.get(invalid_key), include_errors=True) or []
-        rows_for_df_err = []
-        for r in invalid_rows_full:
-            rc = r.copy()
-            rc.pop('errors', None)
-            rc.pop('warnings', None)
-            rows_for_df_err.append(rc)
-        df_err = _df(rows_for_df_err)
+        # 2.5) Special handling for generic "Term Source ID"
+        if field_name == "Term Source ID" or field_name.lower() == "term source id":
+            for col in columns:
+                col_str = str(col)
+                if col_str.lower() == "term source id":
+                    return col
+            for col in columns:
+                col_str = str(col)
+                col_lower = col_str.lower()
+                if col_lower.startswith("term source id."):
+                    suffix = col_lower[len("term source id."):]
+                    if suffix and suffix.isdigit():
+                        if col_str[:len("Term Source ID")].lower() == "term source id":
+                            return col
 
-        valid_rows_full = _flatten_data_rows(st_data.get(valid_key)) or []
-        warning_rows_full = [r for r in valid_rows_full if r.get('warnings')]
-        rows_for_df_warn = []
-        for r in warning_rows_full:
-            rc = r.copy()
-            rc.pop('warnings', None)
-            rows_for_df_warn.append(rc)
-        df_warn = _df(rows_for_df_warn)
+        # 3) If field has dot notation, try using only the base name
+        if "." in field_name:
+            base = field_name.split(".", 1)[0]
+            base_match = _resolve_col(base, columns)
+            if base_match:
+                return base_match
 
-        if not df_err.empty:
-            excel_sheets[f"{st_key[:25]}_errors"] = {"df": df_err, "rows": invalid_rows_full, "mode": "error"}
-        if not df_warn.empty:
-            excel_sheets[f"{st_key[:24]}_warnings"] = {"df": df_warn, "rows": warning_rows_full, "mode": "warn"}
+        return None
+    
+    if validation_results and 'results' in validation_results:
+        validation_data = validation_results['results']
+        results_by_type = validation_data.get('results_by_type', {}) or {}
+        sample_types = validation_data.get('sample_types_processed', []) or []
 
-    if not excel_sheets:
-        raise PreventUpdate
+        for sample_type in sample_types:
+            st_data = results_by_type.get(sample_type, {}) or {}
+            st_key = sample_type.replace(' ', '_')
+
+            invalid_key = f"invalid_{st_key}s"
+            if invalid_key.endswith('ss'):
+                invalid_key = invalid_key[:-1]
+            valid_key = f"valid_{st_key}s"
+
+            # Process invalid rows with errors
+            invalid_rows_full = _flatten_data_rows(st_data.get(invalid_key), include_errors=True) or []
+            for row in invalid_rows_full:
+                sample_name = row.get("Sample Name", "")
+                if not sample_name:
+                    continue
+                
+                sample_name_normalized = str(sample_name).strip().lower()
+                
+                row_err = row.get("errors") or {}
+                row_warn = row.get("warnings") or {}
+
+                if row_err or row_warn:
+                    if sample_name_normalized not in sample_to_field_errors:
+                        sample_to_field_errors[sample_name_normalized] = {"errors": {}, "warnings": {}}
+                    if row_err:
+                        sample_to_field_errors[sample_name_normalized]["errors"] = row_err
+                    if row_warn:
+                        sample_to_field_errors[sample_name_normalized]["warnings"] = row_warn
+
+
+            # Process valid rows with warnings
+            valid_rows_full = _flatten_data_rows(st_data.get(valid_key)) or []
+            for row in valid_rows_full:
+                sample_name = row.get("Sample Name", "")
+                if not sample_name:
+                    continue
+                
+                sample_name_normalized = str(sample_name).strip().lower()
+                
+                warnings = row.get("warnings", [])
+                if warnings:
+                    if sample_name_normalized not in sample_to_field_errors:
+                        sample_to_field_errors[sample_name_normalized] = {"errors": {}, "warnings": {}}
+                    sample_to_field_errors[sample_name_normalized]["warnings"] = warnings
 
     buffer = io.BytesIO()
 
     with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-        for sheet_name, payload in excel_sheets.items():
-            payload["df"].to_excel(writer, sheet_name=sheet_name[:31], index=False)
-
-        book = writer.book
-        fmt_red = book.add_format({"bg_color": "#FFCCCC"})
-        fmt_yellow = book.add_format({"bg_color": "#FFF4CC"})
-
-        comment_opts = {"visible": False, "x_scale": 1.5, "y_scale": 1.8}
-
-        def _short(kind, field, msgs):
-            return (f"{kind}: {field} — " + " | ".join(str(m) for m in msgs)).replace(" | ", "\n• ")
-
-        def _add_prompt(ws, r, c, title, full_text):
-            ws.data_validation(r, c, r, c,
-                               {"validate": "any", "input_title": title[:32], "input_message": full_text[:3000],
-                                "show_input": True})
-
-        for sheet_name, payload in excel_sheets.items():
-            ws = writer.sheets[sheet_name[:31]]
-            df = payload["df"]
-            cols = list(df.columns)
-            mode = payload["mode"]
-            rows_full = payload["rows"]
-
-            for i, raw in enumerate(rows_full, start=1):
-                if mode == "error":
-                    row_err = raw.get("errors") or {}
-                    if isinstance(row_err, dict) and "field_errors" in row_err:
-                        row_err = row_err["field_errors"]
-
-                    for field, msgs in (row_err or {}).items():
-                        col_name = _resolve_col(field, cols)
-                        if not col_name:
-                            continue
-                        c = cols.index(col_name)
-
-                        value = df.iat[i - 1, c] if (i - 1) < len(df) else ""
-                        msgs_list = msgs if isinstance(msgs, list) else [msgs]
-                        only_extra = all("extra inputs are not permitted" in str(m).lower() for m in msgs_list)
-
-                        if only_extra:
-                            ws.write(i, c, value, fmt_yellow)
-                            kind = "Warning"
-                        else:
-                            ws.write(i, c, value, fmt_red)
-                            kind = "Error"
-
-                        text = _short(kind, field, msgs_list)
-                        ws.write_comment(i, c, text, comment_opts)
-
-                        long_text = f"{kind}: {field} — " + " | ".join(str(m) for m in msgs_list)
-                        if len(long_text) > 800:
-                            _add_prompt(ws, i, c, field, long_text)
-
+        for sheet_name in sheet_names:
+            if sheet_name not in all_sheets_data:
+                continue
+            
+            # Get original sheet data
+            sheet_records = all_sheets_data[sheet_name]
+            if not sheet_records:
+                continue
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(sheet_records)
+            
+            # Build Error column and map field errors/warnings to columns
+            error_column = []
+            row_to_field_errors = {}  # {row_index: {"errors": {col_idx: msgs}, "warnings": {col_idx: msgs}}}
+            cols_original = list(df.columns)  # Original columns before adding Error column
+            
+            for row_idx, record in enumerate(sheet_records):
+                # Try to find sample name in various possible column names
+                sample_name = None
+                for key in ["Sample Name", "sample_name", "SampleName", "sampleName"]:
+                    if key in record:
+                        sample_name = str(record.get(key, ""))
+                        break
+                
+                if not sample_name:
+                    sample_name = str(list(record.values())[0]) if record else ""
+                
+                # Normalize sample name for matching
+                sample_name_normalized = sample_name.strip().lower() if sample_name else ""
+                
+                # Get field-level errors/warnings for this sample
+                field_data = sample_to_field_errors.get(sample_name_normalized, {})
+                field_errors = field_data.get("errors", {})
+                field_warnings = field_data.get("warnings", {})
+                
+                # Aggregate error messages for Error column
+                all_error_messages = []
+                for field, msgs in field_errors.items():
+                    msgs_list = msgs if isinstance(msgs, list) else [msgs]
+                    for msg in msgs_list:
+                        all_error_messages.append(f"{field}: {msg}")
+                for field, msgs in field_warnings.items():
+                    msgs_list = msgs if isinstance(msgs, list) else [msgs]
+                    for msg in msgs_list:
+                        all_error_messages.append(f"Warning: {field}: {msg}")
+                
+                error_column.append(" | ".join(all_error_messages) if all_error_messages else "")
+                
+                # Map field errors/warnings to column indices for highlighting
+                if field_errors or field_warnings:
+                    row_to_field_errors[row_idx] = {"errors": {}, "warnings": {}}
+                    
+                    # Map error fields to columns (use original columns before adding Error column)
+                    for field, msgs in field_errors.items():
+                        col = _map_field_to_column_excel(field, cols_original)
+                        if col and col in cols_original:
+                            col_idx = cols_original.index(col)
+                            # Store both messages and field name for tooltip
+                            row_to_field_errors[row_idx]["errors"][col_idx] = {
+                                "field": field,
+                                "messages": msgs
+                            }
+                    
+                    # Map warning fields to columns
+                    for field, msgs in field_warnings.items():
+                        col = _map_field_to_column_excel(field, cols_original)
+                        if col and col in cols_original:
+                            col_idx = cols_original.index(col)
+                            # Store both messages and field name for tooltip
+                            row_to_field_errors[row_idx]["warnings"][col_idx] = {
+                                "field": field,
+                                "messages": msgs
+                            }
+            
+            # Add Error column to DataFrame
+            df["Error"] = error_column
+            
+            # Write to Excel
+            sheet_name_clean = sheet_name[:31]  # Excel sheet name limit
+            df.to_excel(writer, sheet_name=sheet_name_clean, index=False)
+            
+            # Get Excel formatting objects
+            book = writer.book
+            fmt_red = book.add_format({"bg_color": "#FFCCCC"})
+            fmt_yellow = book.add_format({"bg_color": "#FFF4CC"})
+            
+            ws = writer.sheets[sheet_name_clean]
+            cols = list(df.columns)  # Now includes Error column
+            error_col_idx = cols.index("Error")
+            
+            # Helper function to format messages for tooltip
+            def format_tooltip_message(field_name, msgs, is_warning=False):
+                """Format error/warning messages for Excel comment/tooltip."""
+                msgs_list = msgs if isinstance(msgs, list) else [msgs]
+                prefix = "Warning" if is_warning else "Error"
+                # Join messages with line breaks for better readability
+                formatted = f"{prefix} - {field_name}:\n"
+                formatted += "\n".join([f"• {str(msg)}" for msg in msgs_list])
+                # Excel comments have a limit, so truncate if too long
+                max_length = 2000
+                if len(formatted) > max_length:
+                    formatted = formatted[:max_length] + "..."
+                return formatted
+            
+            # Highlight specific cells with errors/warnings and add tooltips
+            for row_idx, record in enumerate(sheet_records):
+                excel_row = row_idx + 1  # Excel is 1-indexed
+                
+                if row_idx in row_to_field_errors:
+                    field_data = row_to_field_errors[row_idx]
+                    
+                    # Highlight error cells (red) - use original column indices
+                    for col_idx, error_data in field_data.get("errors", {}).items():
+                        if col_idx < len(cols):
+                            cell_value = df.iat[row_idx, col_idx] if row_idx < len(df) else ""
+                            ws.write(excel_row, col_idx, cell_value, fmt_red)
+                            # Add tooltip/comment with error message
+                            field_name = error_data.get("field", cols_original[col_idx] if col_idx < len(cols_original) else "")
+                            msgs = error_data.get("messages", [])
+                            tooltip_text = format_tooltip_message(field_name, msgs, is_warning=False)
+                            ws.write_comment(excel_row, col_idx, tooltip_text, 
+                                            {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
+                    
+                    # Highlight warning cells (yellow) - use original column indices
+                    for col_idx, warning_data in field_data.get("warnings", {}).items():
+                        if col_idx < len(cols):
+                            cell_value = df.iat[row_idx, col_idx] if row_idx < len(df) else ""
+                            ws.write(excel_row, col_idx, cell_value, fmt_yellow)
+                            # Add tooltip/comment with warning message
+                            field_name = warning_data.get("field", cols_original[col_idx] if col_idx < len(cols_original) else "")
+                            msgs = warning_data.get("messages", [])
+                            tooltip_text = format_tooltip_message(field_name, msgs, is_warning=True)
+                            ws.write_comment(excel_row, col_idx, tooltip_text,
+                                            {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
+                
+                # Format Error column cell and add tooltip
+                error_text = error_column[row_idx] if row_idx < len(error_column) else ""
+                if error_text:
+                    # Check if this row has any errors (not just warnings)
+                    has_errors = row_idx in row_to_field_errors and row_to_field_errors[row_idx].get("errors", {})
+                    fmt = fmt_yellow if not has_errors else fmt_red
+                    ws.write(excel_row, error_col_idx, error_text, fmt)
+                    # Add tooltip/comment to Error column with all messages
+                    # Format the tooltip nicely
+                    tooltip_parts = []
+                    if row_idx in row_to_field_errors:
+                        field_data = row_to_field_errors[row_idx]
+                        # Add error messages
+                        for col_idx, error_data in field_data.get("errors", {}).items():
+                            field_name = error_data.get("field", cols_original[col_idx] if col_idx < len(cols_original) else "")
+                            msgs = error_data.get("messages", [])
+                            msgs_list = msgs if isinstance(msgs, list) else [msgs]
+                            for msg in msgs_list:
+                                tooltip_parts.append(f"Error - {field_name}: {msg}")
+                        # Add warning messages
+                        for col_idx, warning_data in field_data.get("warnings", {}).items():
+                            field_name = warning_data.get("field", cols_original[col_idx] if col_idx < len(cols_original) else "")
+                            msgs = warning_data.get("messages", [])
+                            msgs_list = msgs if isinstance(msgs, list) else [msgs]
+                            for msg in msgs_list:
+                                tooltip_parts.append(f"Warning - {field_name}: {msg}")
+                    
+                    if tooltip_parts:
+                        tooltip_text = "\n".join([f"• {part}" for part in tooltip_parts])
+                        # Truncate if too long
+                        max_length = 2000
+                        if len(tooltip_text) > max_length:
+                            tooltip_text = tooltip_text[:max_length] + "..."
+                        ws.write_comment(excel_row, error_col_idx, tooltip_text,
+                                        {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
                 else:
-                    by_field = _warnings_by_field(raw.get("warnings", []))
-                    for field, msgs in (by_field or {}).items():
-                        col_name = _resolve_col(field, cols)
-                        if not col_name:
-                            continue
-                        c = cols.index(col_name)
-                        value = df.iat[i - 1, c] if (i - 1) < len(df) else ""
-                        ws.write(i, c, value, fmt_yellow)
-
-                        msgs_list = msgs if isinstance(msgs, list) else [msgs]
-                        text = _short("Warning", field, msgs_list)
-                        ws.write_comment(i, c, text, comment_opts)
-
-                        if len(text) > 800:
-                            _add_prompt(ws, i, c, field, text)
+                    ws.write(excel_row, error_col_idx, "")
 
     buffer.seek(0)
-    return dcc.send_bytes(buffer.getvalue(), "annotated.xlsx")
+    return dcc.send_bytes(buffer.getvalue(), "annotated_template.xlsx")
 
 
 @app.callback(
     Output('validation-results-container', 'children'),
-    [Input('stored-json-validation-results', 'data')]
+    [Input('stored-json-validation-results', 'data')],
+    [State('stored-sheet-names', 'data'),
+     State('stored-all-sheets-data', 'data')]
 )
-def populate_validation_results_tabs(validation_results):
+def populate_validation_results_tabs(validation_results, sheet_names, all_sheets_data):
     if not validation_results or 'results' not in validation_results:
+        return []
+    
+    if not sheet_names:
         return []
 
     validation_data = validation_results['results']
-    sample_types = validation_data.get('sample_types_processed', []) or []
-    if not sample_types:
-        return []
-
-    sample_type_tabs = []
-    sample_types_with_data = []
     
-    for sample_type in sample_types:
-        # Count valid and invalid records for THIS specific sample type only
-        v, iv = _count_valid_invalid_for_type(validation_results, sample_type)
-        warning_count = _count_warnings_for_type(validation_results, sample_type)
+    # Calculate sheet statistics
+    sheet_stats = _calculate_sheet_statistics(validation_results, all_sheets_data or {})
+    
+    sheet_tabs = []
+    sheets_with_data = []
+    
+    for sheet_name in sheet_names:
+        # Get statistics for this sheet
+        stats = sheet_stats.get(sheet_name, {})
+        errors = stats.get('error_records', 0)
+        warnings = stats.get('warning_records', 0)
         
-        # Show tabs that have errors (invalid records) OR warnings (valid records with warnings)
-        has_errors = iv > 0
-        has_warnings = warning_count > 0
-        
-        if has_errors or has_warnings:
-            sample_types_with_data.append(sample_type)
-            # Create label showing counts for THIS tab only (per sample type)
-            # Format: "Sample Type (X valid / Y invalid)"
-            # Warnings are shown in the table with yellow highlighting
-            label = f"{sample_type.capitalize()} ({v} valid / {iv} invalid)"
+        if errors > 0 or warnings > 0:
+            sheets_with_data.append(sheet_name)
+            valid = stats.get('valid_records', 0)
+            # Create label showing counts for THIS sheet
+            label = f"{sheet_name} ({valid} valid / {errors} invalid)"
             
-            sample_type_tabs.append(
+            sheet_tabs.append(
                 dcc.Tab(
                     label=label,
-                    value=sample_type,
-                    id={'type': 'sample-type-tab', 'sample_type': sample_type},
+                    value=sheet_name,
+                    id={'type': 'sheet-validation-tab', 'sheet_name': sheet_name},
                     style={
                         'border': 'none',
                         'padding': '12px 24px',
@@ -1085,19 +1347,19 @@ def populate_validation_results_tabs(validation_results):
                         'fontWeight': 'bold',
                         'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
                     },
-                    children=[html.Div(id={'type': 'sample-type-content', 'index': sample_type})]
+                    children=[html.Div(id={'type': 'sheet-validation-content', 'index': sheet_name})]
                 )
             )
 
-    if not sample_type_tabs:
+    if not sheet_tabs:
         return html.Div([
             html.P("The provided data has been validated successfully with no errors or warnings. You may proceed with submission.", style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
         ])
 
     tabs = dcc.Tabs(
-        id='sample-type-tabs',
-        value=sample_types_with_data[0] if sample_types_with_data else None,
-        children=sample_type_tabs,
+        id='sheet-validation-tabs',
+        value=sheets_with_data[0] if sheets_with_data else None,
+        children=sheet_tabs,
         style={
             'border': 'none',
             'borderBottom': '2px solid #e0e0e0',
@@ -1112,11 +1374,11 @@ def populate_validation_results_tabs(validation_results):
     
     # Add a script component to style the tab labels with colors
     # This will be executed after the tabs are rendered
-    style_script = html.Script("""
+    style_script = html.Script(r"""
         (function() {
             function styleTabLabels() {
                 // Find the tab container
-                const tabContainer = document.getElementById('sample-type-tabs');
+                const tabContainer = document.getElementById('sheet-validation-tabs');
                 if (!tabContainer) {
                     console.log('Tab container not found');
                     return;
@@ -1163,10 +1425,10 @@ def populate_validation_results_tabs(validation_results):
                         
                         // Create styled version with spans
                         const styled = originalText.replace(
-                            /(\\d+)\\s+valid/g, 
+                            /(\d+)\s+valid/g, 
                             '<span style="color: #4CAF50 !important; font-weight: bold !important;">$1 valid</span>'
                         ).replace(
-                            /(\\d+)\\s+invalid/g, 
+                            /(\d+)\s+invalid/g, 
                             '<span style="color: #f44336 !important; font-weight: bold !important;">$1 invalid</span>'
                         );
                         
@@ -1201,7 +1463,7 @@ def populate_validation_results_tabs(validation_results):
                 setTimeout(attemptStyle, 50);
             });
             
-            const container = document.getElementById('sample-type-tabs');
+            const container = document.getElementById('sheet-validation-tabs');
             if (container) {
                 observer.observe(container, { 
                     childList: true, 
@@ -1227,7 +1489,8 @@ def populate_validation_results_tabs(validation_results):
                 };
             }
         })();
-    """)
+    """
+    )
 
     header_bar = html.Div(
         [
@@ -1258,6 +1521,352 @@ def populate_validation_results_tabs(validation_results):
     return html.Div([header_bar, tabs, style_script], style={"marginTop": "8px"})
 
 
+# Callback to populate sheet content when tab is selected
+@app.callback(
+    Output({'type': 'sheet-validation-content', 'index': MATCH}, 'children'),
+    [Input('sheet-validation-tabs', 'value')],
+    [State('stored-json-validation-results', 'data'),
+     State('stored-all-sheets-data', 'data')]
+)
+def populate_sheet_validation_content(selected_sheet_name, validation_results, all_sheets_data):
+    if validation_results is None or selected_sheet_name is None:
+        return []
+
+    if not all_sheets_data or selected_sheet_name not in all_sheets_data:
+        return html.Div("No data available for this sheet.")
+    
+    return make_sheet_validation_panel(selected_sheet_name, validation_results, all_sheets_data)
+
+
+def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_sheets_data: dict):
+    """Create a panel showing validation results for a specific Excel sheet with report at the end."""
+    import uuid
+    panel_id = str(uuid.uuid4())
+    
+    # Get sheet data
+    sheet_records = all_sheets_data.get(sheet_name, [])
+    if not sheet_records:
+        return html.Div([html.H4("No data available", style={'textAlign': 'center', 'margin': '10px 0'})])
+    
+    # Get validation data
+    validation_data = validation_results.get('results', {})
+    results_by_type = validation_data.get('results_by_type', {}) or {}
+    total_summary = validation_data.get('total_summary', {})
+    sample_types = validation_data.get('sample_types_processed', []) or []
+    
+    # Get all validation rows for this sheet
+    sheet_sample_names = {str(record.get("Sample Name", "")) for record in sheet_records}
+    
+    # Collect all rows that belong to this sheet
+    error_map = {}
+    warning_map = {}
+    
+    for sample_type in sample_types:
+        st_data = results_by_type.get(sample_type, {}) or {}
+        st_key = sample_type.replace(' ', '_')
+        invalid_key = f"invalid_{st_key}s"
+        if invalid_key.endswith('ss'):
+            invalid_key = invalid_key[:-1]
+        valid_key = f"valid_{st_key}s"
+        
+        invalid_records = st_data.get(invalid_key, [])
+        valid_records = st_data.get(valid_key, [])
+
+        for record in invalid_records + valid_records:
+            sample_name = record.get("sample_name", "")
+            if sample_name in sheet_sample_names:
+                errors, warnings = get_all_errors_and_warnings(record)
+                if errors:
+                    error_map[sample_name] = errors
+                if warnings:
+                    warning_map[sample_name] = warnings
+
+    # Create DataFrame from sheet records
+    df_all = pd.DataFrame(sheet_records)
+    if df_all.empty:
+        return html.Div([html.H4("No data available", style={'textAlign': 'center', 'margin': '10px 0'})])
+    
+    # Use the same styling logic as make_sample_type_panel
+    def _as_list(msgs):
+        if isinstance(msgs, list):
+            return [str(m) for m in msgs]
+        return [str(msgs)]
+    
+    def _map_field_to_column(field_name, columns):
+        # Same mapping logic as in make_sample_type_panel
+        if not field_name:
+            return None
+        if field_name.startswith("Health Status") and ".term" in field_name:
+            try:
+                parts = field_name.split(".")
+                idx = int(parts[1])
+            except Exception:
+                idx = 0
+            def _clean_col_name(col):
+                col_str = str(col)
+                if '.' in col_str:
+                    return col_str.split('.')[0]
+                return col_str
+            health_status_cols = []
+            for i, col in enumerate(columns):
+                col_str = str(col)
+                if "Health Status" in col_str and "Term Source ID" not in col_str:
+                    health_status_cols.append((i, col))
+            term_cols_after_health_status = []
+            for hs_idx, hs_col in health_status_cols:
+                next_idx = hs_idx + 1
+                if next_idx < len(columns):
+                    next_col = columns[next_idx]
+                    cleaned_next = _clean_col_name(next_col)
+                    if cleaned_next == "Term Source ID":
+                        term_cols_after_health_status.append(next_col)
+            if term_cols_after_health_status:
+                if 0 <= idx < len(term_cols_after_health_status):
+                    return term_cols_after_health_status[idx]
+                return term_cols_after_health_status[-1] if term_cols_after_health_status else None
+        direct = _resolve_col(field_name, columns)
+        if direct:
+            return direct
+        if field_name == "Term Source ID" or field_name.lower() == "term source id":
+            for col in columns:
+                col_str = str(col)
+                if col_str.lower() == "term source id":
+                    return col
+            for col in columns:
+                col_str = str(col)
+                col_lower = col_str.lower()
+                if col_lower.startswith("term source id."):
+                    suffix = col_lower[len("term source id."):]
+                    if suffix and suffix.isdigit():
+                        if col_str[:len("Term Source ID")].lower() == "term source id":
+                            return col
+        if "." in field_name:
+            base = field_name.split(".", 1)[0]
+            base_match = _resolve_col(base, columns)
+            if base_match:
+                return base_match
+        return None
+    
+    # Build cell styles and tooltips
+    cell_styles = []
+    tooltip_data = []
+    
+    
+    for i, row in df_all.iterrows():
+        sample_name = str(row.get("Sample Name", ""))
+        tips = {}
+        row_styles = []
+        
+        if sample_name in error_map:
+            field_errors = error_map[sample_name] or {}
+            for field, msgs in field_errors.items():
+                col = _map_field_to_column(field, df_all.columns)
+                if not col:
+                    col = field # Use field name if no column found
+                
+                col_id = None
+                if col in df_all.columns:
+                    col_id = col
+                else:
+                    col_str = str(col)
+                    for df_col in df_all.columns:
+                        if str(df_col) == col_str:
+                            col_id = df_col
+                            break
+                if not col_id:
+                    continue
+
+                msgs_list = _as_list(msgs)
+                lower_msgs = [m.lower() for m in msgs_list]
+                is_extra = any("extra inputs are not permitted" in lm for lm in lower_msgs)
+                is_warning_like = any("warning" in lm for lm in lower_msgs)
+                prefix = "**Warning**: " if (is_extra or is_warning_like) else "**Error**: "
+                msg_text = prefix + field + " — " + " | ".join(msgs_list)
+                if col_id in tips:
+                    existing = tips[col_id].get("value", "")
+                    combined = f"{existing} | {msg_text}" if existing else msg_text
+                else:
+                    combined = msg_text
+                if is_extra or is_warning_like:
+                    row_styles.append({'if': {'row_index': i, 'column_id': col_id}, 'backgroundColor': '#fff4cc'})
+                    tips[col_id] = {'value': combined, 'type': 'markdown'}
+                else:
+                    row_styles.append({'if': {'row_index': i, 'column_id': col_id}, 'backgroundColor': '#ffcccc'})
+                    tips[col_id] = {'value': combined, 'type': 'markdown'}
+                    
+        
+        if sample_name in warning_map:
+            field_warnings = warning_map[sample_name] or {}
+            for field, msgs in field_warnings.items():
+                col = _map_field_to_column(field, df_all.columns)
+                if not col:
+                    col = field # Use field name if no column found
+
+                col_id = None
+                if col in df_all.columns:
+                    col_id = col
+                else:
+                    col_str = str(col)
+                    for df_col in df_all.columns:
+                        if str(df_col) == col_str:
+                            col_id = df_col
+                            break
+                if not col_id:
+                    continue
+                msgs_list = _as_list(msgs)
+                warn_text = "**Warning**: " + (field if field else 'General') + " — " + " | ".join(msgs_list)
+                if col_id in tips:
+                    existing = tips[col_id].get("value", "")
+                    combined = f"{existing} | {warn_text}" if existing else warn_text
+                else:
+                    combined = warn_text
+                tips[col_id] = {'value': combined, 'type': 'markdown'}
+                row_styles.append({'if': {'row_index': i, 'column_id': col_id}, 'backgroundColor': '#fff4cc'})
+        
+        cell_styles.extend(row_styles)
+        tooltip_data.append(tips)
+    
+    
+    
+    def clean_header_name(header):
+        if '.' in header:
+            return header.split('.')[0]
+        return header
+    
+    columns = [{"name": clean_header_name(c), "id": c} for c in df_all.columns]
+    
+    # Calculate statistics for this sheet
+    total_records = len(sheet_records)
+    error_records = len([s for s in sheet_sample_names if s in error_map])
+    warning_records = len([s for s in sheet_sample_names if s in warning_map and s not in error_map])
+    valid_records = total_records - error_records
+    
+    # Count errors and warnings by field
+    error_fields_count = {}
+    for sample_name, field_errors in error_map.items():
+        for field in field_errors.keys():
+            error_fields_count[field] = error_fields_count.get(field, 0) + 1
+    
+    warning_fields_count = {}
+    for sample_name, field_warnings in warning_map.items():
+        for field in field_warnings.keys():
+            warning_fields_count[field] = warning_fields_count.get(field, 0) + 1
+    
+    # Build report sections
+    report_sections = []
+    
+    
+    
+    # Errors by field
+    if error_fields_count:
+        error_items = sorted(error_fields_count.items(), key=lambda x: x[1], reverse=True)
+        report_sections.append(
+            html.Div([
+                html.H5("Errors by Field", style={
+                    'marginTop': '20px',
+                    'marginBottom': '15px',
+                    'color': '#f44336',
+                    'borderBottom': '2px solid #f44336',
+                    'paddingBottom': '8px'
+                }),
+                html.Ul([
+                    html.Li([
+                        html.Span(f"{field}: ", style={'fontWeight': 'bold'}),
+                        html.Span(f"{count} error(s)", style={'color': '#666'})
+                    ], style={'marginBottom': '6px'})
+                    for field, count in error_items
+                ], style={'padding': '10px', 'backgroundColor': '#ffebee', 'borderRadius': '6px', 'listStylePosition': 'inside'})
+            ])
+        )
+    
+    # Warnings by field
+    if warning_fields_count:
+        warning_items = sorted(warning_fields_count.items(), key=lambda x: x[1], reverse=True)
+        report_sections.append(
+            html.Div([
+                html.H5("Warnings by Field", style={
+                    'marginTop': '20px',
+                    'marginBottom': '15px',
+                    'color': '#ff9800',
+                    'borderBottom': '2px solid #ff9800',
+                    'paddingBottom': '8px'
+                }),
+                html.Ul([
+                    html.Li([
+                        html.Span(f"{field}: ", style={'fontWeight': 'bold'}),
+                        html.Span(f"{count} warning(s)", style={'color': '#666'})
+                    ], style={'marginBottom': '6px'})
+                    for field, count in warning_items
+                ], style={'padding': '10px', 'backgroundColor': '#fff3e0', 'borderRadius': '6px', 'listStylePosition': 'inside'})
+            ])
+        )
+    
+    # Total Summary
+    if total_summary:
+        total_summary_items = []
+        for key, value in total_summary.items():
+            if isinstance(value, (int, float, str)):
+                display_key = key.replace('_', ' ').title()
+                total_summary_items.append(
+                    html.Div([
+                        html.Span(f"{display_key}: ", style={'fontWeight': 'bold'}),
+                        html.Span(str(value), style={'color': '#666'})
+                    ], style={'marginBottom': '8px'})
+                )
+        if total_summary_items:
+            report_sections.append(
+                html.Div([
+                    html.H5("Total Summary", style={
+                        'marginTop': '20px',
+                        'marginBottom': '15px',
+                        'color': '#2196F3',
+                        'borderBottom': '2px solid #2196F3',
+                        'paddingBottom': '8px'
+                    }),
+                    html.Div(
+                        total_summary_items,
+                        style={'padding': '10px', 'backgroundColor': '#e3f2fd', 'borderRadius': '6px'}
+                    )
+                ])
+            )
+    
+    zebra = [{'if': {'row_index': 'odd'}, 'backgroundColor': 'rgb(248, 248, 248)'}]
+    
+    blocks = [
+        html.H4(f"Validation Results - {sheet_name}", style={'textAlign': 'center', 'margin': '10px 0'})
+        ,
+        html.Div([
+            DataTable(
+                id={"type": "sheet-result-table", "sheet_name": sheet_name, "panel_id": panel_id},
+                data=df_all.to_dict("records"),
+                columns=columns,
+                page_size=10,
+                style_table={"overflowX": "auto"},
+                style_cell={"textAlign": "left", "padding": "6px"},
+                style_header={"fontWeight": "bold", "backgroundColor": "rgb(230, 230, 230)"},
+                                style_data_conditional=zebra + cell_styles,
+                tooltip_data=tooltip_data,
+                tooltip_duration=None
+            )
+        ], id={"type": "sheet-table-container", "sheet_name": sheet_name, "panel_id": panel_id},
+            style={'display': 'block'})
+        ,
+        # Add validation report after the table
+        html.Div(
+            report_sections,
+            style={
+                'marginTop': '30px',
+                'padding': '20px',
+                'backgroundColor': '#ffffff',
+                'border': '1px solid #e0e0e0',
+                'borderRadius': '8px',
+                'boxShadow': '0 2px 4px rgba(0,0,0,0.1)'
+            }
+        )
+    ]
+    
+    return html.Div(blocks)
+
 # Callback to populate sample type content when tab is selected
 @app.callback(
     Output({'type': 'sample-type-content', 'index': MATCH}, 'children'),
@@ -1271,11 +1880,12 @@ def populate_sample_type_content(selected_sample_type, validation_results, all_s
 
     validation_data = validation_results['results']
     results_by_type = validation_data.get('results_by_type', {})
-
+    total_summary = validation_data.get('total_summary', {})
+    
     if selected_sample_type not in results_by_type:
         return html.Div("No data available for this sample type.")
-
-    return make_sample_type_panel(selected_sample_type, results_by_type, all_sheets_data)
+    
+    return make_sample_type_panel(selected_sample_type, results_by_type, all_sheets_data, total_summary, validation_results)
 
 
 @app.callback(
@@ -1327,7 +1937,8 @@ def create_sheet_tabs_ui(sheet_names, active_sheet, all_sheets_data=None):
             active_tab_index = i
             break
     tabs = html.Div([
-        html.H4("Samples", style={'textAlign': 'center', 'marginTop': '30px', 'marginBottom': '15px'}),
+        html.H4("Samples", style={'textAlign': 'center', 'marginTop': '30px', 'marginBottom': '15px'})
+        ,
         dcc.Tabs(
             id='sheet-tabs',
             value=active_sheet if active_tab_index is not None else (
@@ -1352,651 +1963,252 @@ def create_sheet_tabs_ui(sheet_names, active_sheet, all_sheets_data=None):
     return tabs
 
 
-def make_sample_type_panel(sample_type: str, results_by_type: dict, all_sheets_data: dict = None):
-    import uuid
-    panel_id = str(uuid.uuid4())
-
-    st_data = results_by_type.get(sample_type, {}) or {}
-    st_key = sample_type.replace(' ', '_')
-    valid_key = f"valid_{st_key}s"
-    invalid_key = f"invalid_{st_key}s"
-    if invalid_key.endswith('ss'):
-        invalid_key = invalid_key[:-1]
-
-    # Get all rows (valid + invalid) with error information
-    invalid_rows = _flatten_data_rows(st_data.get(invalid_key), include_errors=True)
-    valid_rows = _flatten_data_rows(st_data.get(valid_key))
-    all_rows = invalid_rows + valid_rows
-
-    # Create a mapping of sample_name to error/warning info
-    error_map = {}  # {sample_name: {field: [errors]}}
-    warning_map = {}  # {sample_name: {field: [warnings]}}
+def _calculate_sheet_statistics(validation_results, all_sheets_data):
+    """Calculate errors and warnings count for each Excel sheet."""
+    sheet_stats = {}
     
-    def _as_list(msgs):
-        if isinstance(msgs, list):
-            return [str(m) for m in msgs]
-        return [str(msgs)]
-
-    # Map errors from invalid rows
-    for row in invalid_rows:
-        sample_name = row.get("Sample Name", "")
-        if not sample_name:
-            continue
-        row_err = row.get("errors") or {}
-        if isinstance(row_err, dict) and "field_errors" in row_err:
-            row_err = row_err["field_errors"]
-        error_map[sample_name] = row_err
-
-    # Map warnings from valid rows
-    for row in valid_rows:
-        sample_name = row.get("Sample Name", "")
-        if not sample_name:
-            continue
-        warnings = row.get("warnings", [])
-        if warnings:
-            warning_map[sample_name] = _warnings_by_field(warnings)
-
-    # Get original sheet data - try to find matching sheet
-    original_data = []
+    if not validation_results or 'results' not in validation_results:
+        return sheet_stats
+    
+    validation_data = validation_results['results']
+    results_by_type = validation_data.get('results_by_type', {}) or {}
+    sample_types = validation_data.get('sample_types_processed', []) or []
+    
+    # Initialize sheet stats
     if all_sheets_data:
-        # Find the first sheet that has data matching our sample names
-        sample_names_set = {row.get("Sample Name", "") for row in all_rows if row.get("Sample Name")}
-        for sheet_name, sheet_records in all_sheets_data.items():
-            if sheet_records:
-                # Check if this sheet has matching sample names
-                sheet_sample_names = {str(record.get("Sample Name", "")) for record in sheet_records}
-                if sample_names_set.intersection(sheet_sample_names):
-                    original_data = sheet_records
-                    break
-
-    # Use original data if available, otherwise use flattened validation data
-    if original_data:
-        # Merge original data with error/warning information
-        table_data = []
-        for orig_row in original_data:
-            sample_name = str(orig_row.get("Sample Name", ""))
-            row_copy = orig_row.copy()
-            table_data.append(row_copy)
+        for sheet_name in all_sheets_data.keys():
+            sheet_stats[sheet_name] = {
+                'total_records': len(all_sheets_data[sheet_name]) if all_sheets_data[sheet_name] else 0,
+                'valid_records': 0,
+                'error_records': 0,
+                'warning_records': 0,
+                'sample_status': {}  # {sample_name: 'error'|'warning'|'valid'}
+            }
+    
+    # Process each sample type and map to sheets
+    for sample_type in sample_types:
+        st_data = results_by_type.get(sample_type, {}) or {}
+        st_key = sample_type.replace(' ', '_')
         
-        # Create DataFrame from original data
-        df_all = pd.DataFrame(table_data)
-    else:
-        # Fallback: use validation data
-        rows_for_df = []
-        for row in all_rows:
-            rc = row.copy()
-            rc.pop('errors', None)
-            rc.pop('warnings', None)
-            rows_for_df.append(rc)
-        df_all = _df(rows_for_df)
+        invalid_key = f"invalid_{st_key}s"
+        if invalid_key.endswith('ss'):
+            invalid_key = invalid_key[:-1]
+        valid_key = f"valid_{st_key}s"
+        
+        invalid_records = st_data.get(invalid_key, [])
+        valid_records = st_data.get(valid_key, [])
+        
+        all_records = invalid_records + valid_records
+        
+        for record in all_records:
+            sample_name = record.get("sample_name", "")
+            if not sample_name:
+                continue
 
-    if df_all.empty:
-        return html.Div([html.H4("No data available", style={'textAlign': 'center', 'margin': '10px 0'})])
+            errors, warnings = get_all_errors_and_warnings(record)
 
-    # Helper to map backend field names (including nested like "Health Status.0.term")
-    # to actual DataFrame columns based on Excel headers
-    def _map_field_to_column(field_name, columns):
-        if not field_name:
-            return None
-
-        # 1) Special‑case for Health Status term errors:
-        #    Health Status.0.term → Term Source ID column that comes immediately after the 1st Health Status column
-        #    Health Status.1.term → Term Source ID column that comes immediately after the 2nd Health Status column
-        if field_name.startswith("Health Status") and ".term" in field_name:
-            try:
-                parts = field_name.split(".")
-                idx = int(parts[1])
-            except Exception:
-                idx = 0
-
-            # Helper to clean column name (remove .1, .2 suffixes)
-            def _clean_col_name(col):
-                col_str = str(col)
-                if '.' in col_str:
-                    return col_str.split('.')[0]
-                return col_str
-            
-            # Find all Health Status columns in order
-            health_status_cols = []
-            for i, col in enumerate(columns):
-                col_str = str(col)
-                # Check if this is a Health Status column (may have .1, .2 suffixes)
-                # But not a Term Source ID column that contains "Health Status" in its name
-                if "Health Status" in col_str and "Term Source ID" not in col_str:
-                    health_status_cols.append((i, col))
-            
-            # For each Health Status column, find the Term Source ID column immediately after it
-            term_cols_after_health_status = []
-            for hs_idx, hs_col in health_status_cols:
-                # Check if the next column is a generic Term Source ID (exactly "Term Source ID", not "Breed Term Source ID", etc.)
-                next_idx = hs_idx + 1
-                if next_idx < len(columns):
-                    next_col = columns[next_idx]
-                    cleaned_next = _clean_col_name(next_col)
-                    # Check if it's exactly "Term Source ID" (not "Breed Term Source ID", "Sex Term Source ID", etc.)
-                    if cleaned_next == "Term Source ID":
-                        term_cols_after_health_status.append(next_col)
-            
-            # Map the index to the corresponding Term Source ID column
-            if term_cols_after_health_status:
-                if 0 <= idx < len(term_cols_after_health_status):
-                    return term_cols_after_health_status[idx]
-                # Fallback: if index is out of range, use the last one
-                return term_cols_after_health_status[-1]
-
-        # 2) Try direct match (case-insensitive) e.g. "Breed", "Breed Term Source ID"
-        direct = _resolve_col(field_name, columns)
-        if direct:
-            return direct
-
-        # 2.5) Special handling for generic "Term Source ID" - match columns that are exactly "Term Source ID"
-        # or "Term Source ID.1", "Term Source ID.2", etc. (but NOT "Breed Term Source ID" or other specific ones)
-        if field_name == "Term Source ID" or field_name.lower() == "term source id":
-            # First, try exact match
-            for col in columns:
-                col_str = str(col)
-                if col_str.lower() == "term source id":
-                    return col
-            
-            # Then try matching "Term Source ID.1", "Term Source ID.2", etc.
-            # These are generic Term Source ID columns (not specific like "Breed Term Source ID")
-            for col in columns:
-                col_str = str(col)
-                col_lower = col_str.lower()
-                
-                # Match pattern: "Term Source ID" followed by a dot and a number
-                # e.g., "Term Source ID.1", "Term Source ID.2"
-                if col_lower.startswith("term source id."):
-                    # Extract the suffix after "term source id."
-                    suffix = col_lower[len("term source id."):].strip()
-                    # Check if suffix is just a number (like "1", "2")
-                    if suffix and suffix.isdigit():
-                        # Verify the column name starts with "Term Source ID" (not preceded by other words)
-                        # This excludes "Breed Term Source ID.1" or "Sex Term Source ID.2"
-                        if col_str[:len("Term Source ID")].lower() == "term source id":
-                            return col
-
-        # 3) If field has dot notation (e.g. "Health Status.0.term"),
-        #    try using only the base name before the first dot
-        if "." in field_name:
-            base = field_name.split(".", 1)[0]
-            base_match = _resolve_col(base, columns)
-            if base_match:
-                return base_match
-
-        return None
-
-    # Build cell styles and tooltips for all rows
-    cell_styles = []
-    tooltip_data = []
-    cols_with_real_errors = set()
-
-    for i, row in df_all.iterrows():
-        sample_name = str(row.get("Sample Name", ""))
-        tips = {}
-        row_styles = []
-
-        # Check for errors
-        if sample_name in error_map:
-            field_errors = error_map[sample_name] or {}
-            for field, msgs in field_errors.items():
-                col = _map_field_to_column(field, df_all.columns)
-                if not col:
+            # Find which sheet contains this sample
+            for sheet_name, sheet_records in (all_sheets_data or {}).items():
+                if not sheet_records:
                     continue
-                
-                # Ensure the column exists in the DataFrame (use exact column from DataFrame)
-                if col not in df_all.columns:
-                    # Try to find by string matching
-                    col_str = str(col)
-                    found_col = None
-                    for df_col in df_all.columns:
-                        if str(df_col) == col_str:
-                            found_col = df_col
-                            break
-                    if not found_col:
-                        continue
-                    col = found_col
-                
-                msgs_list = _as_list(msgs)
-                lower_msgs = [m.lower() for m in msgs_list]
-                # Treat ontology / other warnings that arrive inside "errors" as warnings for styling
-                is_extra = any("extra inputs are not permitted" in lm for lm in lower_msgs)
-                is_warning_like = any("warning" in lm for lm in lower_msgs)
-
-                # Build this field's message text (include full field name like "Health Status.1.term")
-                prefix = "**Warning**: " if (is_extra or is_warning_like) else "**Error**: "
-                msg_text = prefix + field + " — " + " | ".join(msgs_list)
-
-                # If there's already a tooltip for this column, append with a separator
-                if col in tips:
-                    existing = tips[col].get("value", "")
-                    combined = f"{existing} | {msg_text}" if existing else msg_text
-                else:
-                    combined = msg_text
-
-                if is_extra or is_warning_like:
-                    row_styles.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#fff4cc'})
-                    tips[col] = {'value': combined, 'type': 'markdown'}
-                else:
-                    row_styles.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#ffcccc'})
-                    tips[col] = {'value': combined, 'type': 'markdown'}
-                    cols_with_real_errors.add(col)
-
-        # Check for warnings
-        if sample_name in warning_map:
-            field_warnings = warning_map[sample_name] or {}
-            for field, msgs in field_warnings.items():
-                col = _map_field_to_column(field, df_all.columns)
-                if not col:
-                    continue
-                
-                # Ensure the column exists in the DataFrame (use exact column from DataFrame)
-                if col not in df_all.columns:
-                    # Try to find by string matching
-                    col_str = str(col)
-                    found_col = None
-                    for df_col in df_all.columns:
-                        if str(df_col) == col_str:
-                            found_col = df_col
-                            break
-                    if not found_col:
-                        continue
-                    col = found_col
-                
-                # Only add warning style if not already styled by error
-                if not any(s.get('column_id') == col for s in row_styles):
-                    row_styles.append({'if': {'row_index': i, 'column_id': col}, 'backgroundColor': '#fff4cc'})
-
-                # Build warning text and append if a tooltip already exists
-                warn_text = f"**Warning**: {field} — " + " | ".join(map(str, msgs))
-                if col in tips:
-                    existing = tips[col].get("value", "")
-                    combined = f"{existing} | {warn_text}" if existing else warn_text
-                else:
-                    combined = warn_text
-                tips[col] = {'value': combined, 'type': 'markdown'}
-
-        cell_styles.extend(row_styles)
-        tooltip_data.append(tips)
-
-    tint_whole_columns = [
-        {'if': {'column_id': c}, 'backgroundColor': '#ffd6d6'}
-        for c in sorted(cols_with_real_errors)
-    ]
-
-    base_cell = {"textAlign": "left", "padding": "6px", "minWidth": 120, "whiteSpace": "normal", "height": "auto"}
-    zebra = [{'if': {'row_index': 'odd'}, 'backgroundColor': 'rgb(248, 248, 248)'}]
-
-    # Create columns with cleaned display names (remove part after period)
-    def clean_header_name(header):
-        """Remove part after period from header name for display"""
-        if '.' in header:
-            return header.split('.')[0]
-        return header
+                sheet_sample_names = {str(r.get("Sample Name", "")) for r in sheet_records}
+                if sample_name in sheet_sample_names:
+                    if sheet_name not in sheet_stats:
+                        sheet_stats[sheet_name] = {
+                            'total_records': len(sheet_records),
+                            'valid_records': 0,
+                            'error_records': 0,
+                            'warning_records': 0,
+                            'sample_status': {}
+                        }
+                    
+                    if sample_name not in sheet_stats[sheet_name]['sample_status']:
+                        if errors:
+                            sheet_stats[sheet_name]['error_records'] += 1
+                            sheet_stats[sheet_name]['sample_status'][sample_name] = 'error'
+                        elif warnings:
+                            sheet_stats[sheet_name]['warning_records'] += 1
+                            sheet_stats[sheet_name]['sample_status'][sample_name] = 'warning'
+                        else:
+                            sheet_stats[sheet_name]['valid_records'] += 1
+                            sheet_stats[sheet_name]['sample_status'][sample_name] = 'valid'
+                    break
     
-    columns = [{"name": clean_header_name(c), "id": c} for c in df_all.columns]
-    
-    blocks = [
-        html.H4("Validation Results", style={'textAlign': 'center', 'margin': '10px 0'}),
-        html.Div([
-            DataTable(
-                id={"type": "result-table-all", "sample_type": sample_type, "panel_id": panel_id},
-                data=df_all.to_dict("records"),
-                columns=columns,
+    # Correct valid counts
+    for sheet_name in sheet_stats:
+        stats = sheet_stats[sheet_name]
+        stats['valid_records'] = stats['total_records'] - stats['error_records']
+
+    return sheet_stats
+
+
+@app.callback(
+    Output('biosamples-form', 'style'),
+    Input('stored-json-validation-results', 'data')
+)
+def toggle_biosamples_form(validation_results):
+    if not validation_results:
+        return {'display': 'none'}
+    v, iv = _valid_invalid_counts(validation_results)
+    if v > 0 and iv == 0:
+        return {'display': 'block', 'marginTop': '16px'}
+    return {'display': 'none'}
+
+
+@app.callback(
+    [Output("biosamples-submit-msg", "children"),
+     Output("submission-job-id", "data"),
+     Output("submission-poller", "disabled"),
+     Output("submission-env", "data"),
+     Output("submission-room-id", "data")],
+    [Input("biosamples-submit-btn", "n_clicks")],
+    [State("biosamples-username", "value"),
+     State("biosamples-password", "value"),
+     State("biosamples-env", "value"),
+     State("stored-json-validation-results", "data"),
+     State("biosamples-action", "value")]
+)
+def submit_to_biosamples(n, user, pwd, env, validation_results, action):
+    if not n or not validation_results:
+        return "", dash.no_update, True, dash.no_update, dash.no_update
+
+    if not user or not pwd:
+        return html.P("Please enter username and password", style={"color": "red"}), \
+            dash.no_update, True, dash.no_update, dash.no_update
+
+    valid_records = _collect_valid_records(validation_results)
+    if not valid_records:
+        return html.P("No valid records to submit", style={"color": "red"}), \
+            dash.no_update, True, dash.no_update, dash.no_update
+
+    room_id = str(uuid4())
+    api_url = f"{BACKEND_API_URL}/submit/{action}/{room_id}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "user": user,
+        "pass": pwd,
+        "env": env,
+        "records": valid_records
+    }
+
+    try:
+        resp = requests.post(api_url, json=payload, headers=headers)
+        if resp.status_code == 200:
+            job_id = resp.json().get("job_id")
+            if job_id:
+                return dcc.Loading(f"Submission started. Job ID: {job_id}"), job_id, False, env, room_id
+            else:
+                return html.P(f"Submission failed: {resp.text}", style={"color": "red"}), \
+                    dash.no_update, True, dash.no_update, dash.no_update
+        else:
+            return html.P(f"Submission failed: {resp.text}", style={"color": "red"}), \
+                dash.no_update, True, dash.no_update, dash.no_update
+    except Exception as e:
+        return html.P(f"Error: {e}", style={"color": "red"}), \
+            dash.no_update, True, dash.no_update, dash.no_update
+
+
+@app.callback(
+    [Output("submission-status", "data"),
+     Output("biosamples-status-banner", "children"),
+     Output("biosamples-status-banner", "style")],
+    [Input("submission-poller", "n_intervals")],
+    [State("submission-job-id", "data"),
+     State("submission-env", "data"),
+     State("submission-room-id", "data")]
+)
+def poll_submission_status(n, job_id, env, room_id):
+    if not job_id:
+        raise PreventUpdate
+
+    status_url = f"{BACKEND_API_URL}/submit/status/{room_id}"
+    try:
+        resp = requests.get(status_url)
+        if resp.status_code == 200:
+            status_data = resp.json()
+            status = status_data.get("status", "unknown")
+            msg = status_data.get("message", "")
+
+            banner_style = {"padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px"}
+            if status == "running":
+                banner_style.update({"backgroundColor": "#e3f2fd", "color": "#1e88e5"})
+                return status, msg, banner_style
+            elif status == "done":
+                banner_style.update({"backgroundColor": "#e8f5e9", "color": "#43a047"})
+                return status, msg, banner_style
+            elif status == "error":
+                banner_style.update({"backgroundColor": "#ffebee", "color": "#e53935"})
+                return status, msg, banner_style
+            else:
+                return status, msg, {"display": "none"}
+        else:
+            return "error", f"Error fetching status: {resp.text}", {"display": "none"}
+    except Exception as e:
+        return "error", f"Error: {e}", {"display": "none"}
+
+
+@app.callback(
+    Output("biosamples-results-table", "children"),
+    [Input("submission-status", "data")],
+    [State("submission-room-id", "data")]
+)
+def display_submission_results(status, room_id):
+    if status != "done":
+        raise PreventUpdate
+
+    results_url = f"{BACKEND_API_URL}/submit/results/{room_id}"
+    try:
+        resp = requests.get(results_url)
+        if resp.status_code == 200:
+            results = resp.json()
+            if not results:
+                return html.P("No results available.")
+
+            df = pd.DataFrame(results)
+            return DataTable(
+                data=df.to_dict("records"),
+                columns=[{"name": i, "id": i} for i in df.columns],
                 page_size=10,
                 style_table={"overflowX": "auto"},
                 style_cell={"textAlign": "left", "padding": "6px"},
                 style_header={"fontWeight": "bold", "backgroundColor": "rgb(230, 230, 230)"},
-                # style_cell=base_cell,
-                # style_header={"fontWeight": "bold"},
-                style_data_conditional=zebra + cell_styles + tint_whole_columns,
-                tooltip_data=tooltip_data,
-                tooltip_duration=None
-            )
-        ], id={"type": "table-container-all", "sample_type": sample_type, "panel_id": panel_id},
-            style={'display': 'block'}),
-    ]
-
-    return html.Div(blocks)
-
-@app.callback(
-    Output("biosamples-form-mount", "children"),
-    Input("stored-json-validation-results", "data"),
-    prevent_initial_call=True,
-)
-def _mount_biosamples_form(v):
-    if not v or "results" not in v:
-        raise PreventUpdate
-
-    results = v.get("results", {})
-    if not results.get("results_by_type"):
-        raise PreventUpdate
-
-    return biosamples_form()
-
-
-@app.callback(
-    [
-        Output("biosamples-form", "style"),
-        Output("biosamples-status-banner", "children"),
-        Output("biosamples-status-banner", "style"),
-    ],
-    Input("stored-json-validation-results", "data"),
-)
-def _toggle_biosamples_form(v):
-    base_style = {"display": "block", "marginTop": "16px"}
-
-    if not v or "results" not in v:
-        return ({"display": "none"}, "", {"display": "none"})
-
-    valid_cnt, invalid_cnt = _valid_invalid_counts(v)
-    style_ok = {
-        "display": "block",
-        "backgroundColor": "#e6f4ea",
-        "border": "1px solid #b7e1c5",
-        "color": "#137333",
-        "padding": "10px 12px",
-        "borderRadius": "8px",
-        "marginBottom": "12px",
-        "fontWeight": 500,
-    }
-    style_warn = {
-        "display": "block",
-        "backgroundColor": "#fff7e6",
-        "border": "1px solid #ffd699",
-        "color": "#8a6d3b",
-        "padding": "10px 12px",
-        "borderRadius": "8px",
-        "marginBottom": "12px",
-        "fontWeight": 500,
-    }
-    # Count total warnings across all sample types
-    total_warnings = _count_total_warnings(v)
-    
-    # Only show submit panel if all data is valid (no errors AND no warnings)
-    if invalid_cnt == 0 and total_warnings == 0 and valid_cnt > 0:
-        msg_children = [
-            html.Span(
-                f"Validation result: {valid_cnt} valid sample(s). All data is valid with no errors or warnings. You may proceed with submission."
-            ),
-            html.Br(),
-        ]
-        return base_style, msg_children, style_ok
-    else:
-        # Hide submit panel if there are errors or warnings
-        if invalid_cnt > 0:
-            msg = f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s). Please fix errors before submitting."
-        elif total_warnings > 0:
-            msg = f"Validation result: {valid_cnt} valid sample(s) with {total_warnings} warning(s). Please review and fix warnings before submitting."
-        else:
-            msg = f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s). No valid samples to submit."
-        return (
-            {"display": "none"},
-            msg,
-            style_warn,
-        )
-
-
-@app.callback(
-    Output("biosamples-submit-btn", "disabled"),
-    [
-        Input("biosamples-username", "value"),
-        Input("biosamples-password", "value"),
-        Input("stored-json-validation-results", "data"),
-    ],
-)
-def _disable_submit(u, p, v):
-    if not v or "results" not in v:
-        return True
-    valid_cnt, invalid_cnt = _valid_invalid_counts(v)
-    total_warnings = _count_total_warnings(v)
-    
-    # Disable if no valid samples, or if there are errors or warnings
-    if valid_cnt == 0:
-        return True
-    if invalid_cnt > 0 or total_warnings > 0:
-        return True
-    
-    # Enable only if username and password are filled
-    return not (u and p)
-
-
-@app.callback(
-    [
-        Output("biosamples-submit-msg", "children"),
-        Output("biosamples-results-table", "children"),
-    ],
-    Input("biosamples-submit-btn", "n_clicks"),
-    State("biosamples-username", "value"),
-    State("biosamples-password", "value"),
-    State("biosamples-env", "value"),
-    State("biosamples-action", "value"),
-    State("stored-json-validation-results", "data"),
-    prevent_initial_call=True,
-)
-def _submit_to_biosamples(n, username, password, env, action, v):
-    if not n:
-        raise PreventUpdate
-
-    if not v or "results" not in v:
-        msg = html.Span(
-            "No validation results available. Please validate your file first.",
-            style={"color": "#c62828", "fontWeight": 500},
-        )
-        return msg, dash.no_update
-
-    valid_cnt, invalid_cnt = _valid_invalid_counts(v)
-    if valid_cnt == 0:
-        msg = html.Span(
-            "No valid samples to submit. Please fix errors and re-validate.",
-            style={"color": "#c62828", "fontWeight": 500},
-        )
-        return msg, dash.no_update
-
-    if not username or not password:
-        msg = html.Span(
-            "Please enter Webin username and password.",
-            style={"color": "#c62828", "fontWeight": 500},
-        )
-        return msg, dash.no_update
-
-    validation_results = v["results"]
-
-    body = {
-        "validation_results": validation_results,
-        "webin_username": username,
-        "webin_password": password,
-        "mode": env,
-        "update_existing": action == "update",
-    }
-
-    try:
-        url = f"{BACKEND_API_URL}/submit-to-biosamples"
-        r = requests.post(url, json=body, timeout=600)
-
-        if not r.ok:
-            msg = html.Span(
-                f"Submission failed [{r.status_code}]: {r.text}",
-                style={"color": "#c62828", "fontWeight": 500},
-            )
-            return msg, dash.no_update
-
-        data = r.json() if r.content else {}
-
-        success = data.get("success", False)
-        message = data.get("message", "No message from server")
-        submitted_count = data.get("submitted_count")
-        errors = data.get("errors") or []
-        biosamples_ids = data.get("biosamples_ids") or {}
-
-        color = "#388e3c" if success else "#c62828"
-
-        msg_children = [html.Span(message, style={"fontWeight": 500})]
-        if submitted_count is not None:
-            msg_children += [
-                html.Br(),
-                html.Span(f"Submitted samples: {submitted_count}"),
-            ]
-        if errors:
-            msg_children += [
-                html.Br(),
-                html.Ul(
-                    [html.Li(e) for e in errors],
-                    style={"marginTop": "6px", "color": "#c62828"},
-                ),
-            ]
-
-        msg = html.Div(msg_children, style={"color": color})
-
-        if biosamples_ids:
-            table_data = [
-                {"Sample Name": name, "BioSample ID": acc}
-                for name, acc in biosamples_ids.items()
-            ]
-
-            for row in table_data:
-                acc = row.get("BioSample ID")
-                if acc:
-                    row[
-                        "BioSample ID"
-                    ] = f"[{acc}](https://www.ebi.ac.uk/biosamples/samples/{acc})"
-
-            table = dash_table.DataTable(
-                data=table_data,
-                columns=[
-                    {"name": "Sample Name", "id": "Sample Name"},
-                    {
-                        "name": "BioSample ID",
-                        "id": "BioSample ID",
-                        "presentation": "markdown",
-                    },
-                ],
-                page_size=10,
-                style_table={"overflowX": "auto"},
-                style_cell={"textAlign": "left"},
+                style_data_conditional=[{'if': {'row_index': 'odd'}, 'backgroundColor': 'rgb(248, 248, 248)'}]
             )
         else:
-            table = html.Div(
-                "No BioSample accessions returned.",
-                style={"marginTop": "8px", "color": "#555"},
-            )
-
-        return msg, table
-
+            return html.P(f"Error fetching results: {resp.text}", style={"color": "red"})
     except Exception as e:
-        msg = html.Span(
-            f"Submission error: {e}",
-            style={"color": "#c62828", "fontWeight": 500},
-        )
-        return msg, dash.no_update
+        return html.P(f"Error: {e}", style={"color": "red"})
 
 
 @app.callback(
-    Output("biosamples-form-mount", "children", allow_duplicate=True),
-    Input("upload-data", "contents"),
-    prevent_initial_call=True,
+    [Output('dummy-output-for-reset', 'children'),
+     Output('stored-file-data', 'data', allow_duplicate=True),
+     Output('stored-filename', 'data', allow_duplicate=True),
+     Output('file-chosen-text', 'children', allow_duplicate=True),
+     Output('selected-file-display', 'children', allow_duplicate=True),
+     Output('selected-file-display', 'style', allow_duplicate=True),
+     Output('output-data-upload', 'children', allow_duplicate=True),
+     Output('stored-all-sheets-data', 'data', allow_duplicate=True),
+     Output('stored-sheet-names', 'data', allow_duplicate=True),
+     Output('stored-parsed-json', 'data', allow_duplicate=True),
+     Output('active-sheet', 'data', allow_duplicate=True),
+     Output('stored-json-validation-results', 'data', allow_duplicate=True),
+     Output('validate-button', 'disabled', allow_duplicate=True),
+     Output('validate-button-container', 'style', allow_duplicate=True),
+     Output('reset-button-container', 'style', allow_duplicate=True)],
+    [Input('reset-button', 'n_clicks')],
+    prevent_initial_call=True
 )
-def _clear_biosamples_form_on_new_upload(_):
-    return []
-
-
-app.clientside_callback(
-    """
-    function(n_clicks) {
-        if (n_clicks > 0) {
-            window.location.reload();
-        }
-        return '';
-    }
-    """,
-    Output("dummy-output-for-reset", "children"),
-    [Input("reset-button", "n_clicks")],
-    prevent_initial_call=True,
-)
-
-# Clientside callback to style tab labels when validation results are updated
-app.clientside_callback(
-    """
-    function(validation_results) {
-        if (!validation_results) {
-            return window.dash_clientside.no_update;
-        }
-        
-        // Function to style tab labels
-        function styleTabLabels() {
-            const tabContainer = document.getElementById('sample-type-tabs');
-            if (!tabContainer) {
-                return;
-            }
-            
-            // Try multiple selectors to find tab elements
-            let tabLabels = tabContainer.querySelectorAll('[role="tab"]');
-            if (tabLabels.length === 0) {
-                tabLabels = tabContainer.querySelectorAll('.tab, [class*="tab"], [class*="Tab"], div[class*="tab"]');
-            }
-            if (tabLabels.length === 0) {
-                tabLabels = tabContainer.querySelectorAll('div, button, a, span');
-            }
-            
-            tabLabels.forEach((tab) => {
-                let textElement = tab;
-                let originalText = tab.textContent || tab.innerText || '';
-                
-                // Check children for text
-                if (tab.children && tab.children.length > 0) {
-                    for (let child of Array.from(tab.children)) {
-                        const childText = child.textContent || child.innerText || '';
-                        if (childText && (childText.includes('valid') || childText.includes('invalid'))) {
-                            textElement = child;
-                            originalText = childText;
-                            break;
-                        }
-                    }
-                }
-                
-                if (originalText && (originalText.includes('valid') || originalText.includes('invalid'))) {
-                    // Skip if already styled
-                    if (textElement.querySelector && textElement.querySelector('span[style*="color"]')) {
-                        return;
-                    }
-                    
-                    // Create styled version
-                    const styled = originalText.replace(
-                        /(\\d+)\\s+valid/g, 
-                        '<span style="color: #4CAF50 !important; font-weight: bold !important;">$1 valid</span>'
-                    ).replace(
-                        /(\\d+)\\s+invalid/g, 
-                        '<span style="color: #f44336 !important; font-weight: bold !important;">$1 invalid</span>'
-                    );
-                    
-                    if (styled !== originalText && styled.includes('<span')) {
-                        try {
-                            textElement.innerHTML = styled;
-                        } catch (e) {
-                            console.error('Error styling tab:', e);
-                        }
-                    }
-                }
-            });
-        }
-        
-        // Run after delays to ensure DOM is ready
-        setTimeout(styleTabLabels, 100);
-        setTimeout(styleTabLabels, 500);
-        setTimeout(styleTabLabels, 1000);
-        
-        return window.dash_clientside.no_update;
-    }
-    """,
-    Output('validation-results-container', 'children', allow_duplicate=True),
-    [Input('stored-json-validation-results', 'data')],
-    prevent_initial_call='initial_duplicate'
-)
-
-
+def reset_app_state(n_clicks):
+    if n_clicks > 0:
+        return (
+            f"Resetting app state (n_clicks={n_clicks})",
+            None, None, "No file chosen", [], {'display': 'none'},
+            [], None, None, None, None, None,
+            True, {'display': 'none', 'marginLeft': '10px'}, {'display': 'none', 'marginLeft': '10px'}
+        )
+    return dash.no_update
 
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8050))
-    debug = os.environ.get('ENVIRONMENT', 'development') != 'production'
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    app.run(debug=True, port=8052)
