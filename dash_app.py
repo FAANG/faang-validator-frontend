@@ -1867,25 +1867,7 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
     
     return html.Div(blocks)
 
-# Callback to populate sample type content when tab is selected
-@app.callback(
-    Output({'type': 'sample-type-content', 'index': MATCH}, 'children'),
-    [Input('sample-type-tabs', 'value')],
-    [State('stored-json-validation-results', 'data'),
-     State('stored-all-sheets-data', 'data')]
-)
-def populate_sample_type_content(selected_sample_type, validation_results, all_sheets_data):
-    if validation_results is None or selected_sample_type is None:
-        return []
 
-    validation_data = validation_results['results']
-    results_by_type = validation_data.get('results_by_type', {})
-    total_summary = validation_data.get('total_summary', {})
-    
-    if selected_sample_type not in results_by_type:
-        return html.Div("No data available for this sample type.")
-    
-    return make_sample_type_panel(selected_sample_type, results_by_type, all_sheets_data, total_summary, validation_results)
 
 
 @app.callback(
@@ -2042,162 +2024,322 @@ def _calculate_sheet_statistics(validation_results, all_sheets_data):
     return sheet_stats
 
 
-@app.callback(
-    Output('biosamples-form', 'style'),
-    Input('stored-json-validation-results', 'data')
+app.callback(
+    Output("biosamples-form-mount", "children"),
+    Input("stored-json-validation-results", "data"),
+    prevent_initial_call=True,
 )
-def toggle_biosamples_form(validation_results):
-    if not validation_results:
-        return {'display': 'none'}
-    v, iv = _valid_invalid_counts(validation_results)
-    if v > 0 and iv == 0:
-        return {'display': 'block', 'marginTop': '16px'}
-    return {'display': 'none'}
+
+
+def _mount_biosamples_form(v):
+    if not v or "results" not in v:
+        raise PreventUpdate
+
+    results = v.get("results", {})
+    if not results.get("results_by_type"):
+        raise PreventUpdate
+
+    return biosamples_form()
 
 
 @app.callback(
-    [Output("biosamples-submit-msg", "children"),
-     Output("submission-job-id", "data"),
-     Output("submission-poller", "disabled"),
-     Output("submission-env", "data"),
-     Output("submission-room-id", "data")],
-    [Input("biosamples-submit-btn", "n_clicks")],
-    [State("biosamples-username", "value"),
-     State("biosamples-password", "value"),
-     State("biosamples-env", "value"),
-     State("stored-json-validation-results", "data"),
-     State("biosamples-action", "value")]
+    [
+        Output("biosamples-form", "style"),
+        Output("biosamples-status-banner", "children"),
+        Output("biosamples-status-banner", "style"),
+    ],
+    Input("stored-json-validation-results", "data"),
 )
-def submit_to_biosamples(n, user, pwd, env, validation_results, action):
-    if not n or not validation_results:
-        return "", dash.no_update, True, dash.no_update, dash.no_update
+def _toggle_biosamples_form(v):
+    base_style = {"display": "block", "marginTop": "16px"}
 
-    if not user or not pwd:
-        return html.P("Please enter username and password", style={"color": "red"}), \
-            dash.no_update, True, dash.no_update, dash.no_update
+    if not v or "results" not in v:
+        return ({"display": "none"}, "", {"display": "none"})
 
-    valid_records = _collect_valid_records(validation_results)
-    if not valid_records:
-        return html.P("No valid records to submit", style={"color": "red"}), \
-            dash.no_update, True, dash.no_update, dash.no_update
+    valid_cnt, invalid_cnt = _valid_invalid_counts(v)
+    style_ok = {
+        "display": "block",
+        "backgroundColor": "#e6f4ea",
+        "border": "1px solid #b7e1c5",
+        "color": "#137333",
+        "padding": "10px 12px",
+        "borderRadius": "8px",
+        "marginBottom": "12px",
+        "fontWeight": 500,
+    }
+    style_warn = {
+        "display": "block",
+        "backgroundColor": "#fff7e6",
+        "border": "1px solid #ffd699",
+        "color": "#8a6d3b",
+        "padding": "10px 12px",
+        "borderRadius": "8px",
+        "marginBottom": "12px",
+        "fontWeight": 500,
+    }
+    if valid_cnt > 0:
+        msg_children = [
+            html.Span(
+                f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s)."
+            ),
+            html.Br(),
+        ]
+        return base_style, msg_children, style_ok
+    else:
+        return (
+            base_style,
+            f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s). No valid samples to submit.",
+            style_warn,
+        )
 
-    room_id = str(uuid4())
-    api_url = f"{BACKEND_API_URL}/submit/{action}/{room_id}"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "user": user,
-        "pass": pwd,
-        "env": env,
-        "records": valid_records
+
+@app.callback(
+    Output("biosamples-submit-btn", "disabled"),
+    [
+        Input("biosamples-username", "value"),
+        Input("biosamples-password", "value"),
+        Input("stored-json-validation-results", "data"),
+    ],
+)
+def _disable_submit(u, p, v):
+    if not v or "results" not in v:
+        return True
+    valid_cnt, _ = _valid_invalid_counts(v)
+    if valid_cnt == 0:
+        return True
+    return not (u and p)
+
+
+@app.callback(
+    [
+        Output("biosamples-submit-msg", "children"),
+        Output("biosamples-results-table", "children"),
+    ],
+    Input("biosamples-submit-btn", "n_clicks"),
+    State("biosamples-username", "value"),
+    State("biosamples-password", "value"),
+    State("biosamples-env", "value"),
+    State("biosamples-action", "value"),
+    State("stored-json-validation-results", "data"),
+    prevent_initial_call=True,
+)
+def _submit_to_biosamples(n, username, password, env, action, v):
+    if not n:
+        raise PreventUpdate
+
+    if not v or "results" not in v:
+        msg = html.Span(
+            "No validation results available. Please validate your file first.",
+            style={"color": "#c62828", "fontWeight": 500},
+        )
+        return msg, dash.no_update
+
+    valid_cnt, invalid_cnt = _valid_invalid_counts(v)
+    if valid_cnt == 0:
+        msg = html.Span(
+            "No valid samples to submit. Please fix errors and re-validate.",
+            style={"color": "#c62828", "fontWeight": 500},
+        )
+        return msg, dash.no_update
+
+    if not username or not password:
+        msg = html.Span(
+            "Please enter Webin username and password.",
+            style={"color": "#c62828", "fontWeight": 500},
+        )
+        return msg, dash.no_update
+
+    validation_results = v["results"]
+
+    body = {
+        "validation_results": validation_results,
+        "webin_username": username,
+        "webin_password": password,
+        "mode": env,
+        "update_existing": action == "update",
     }
 
     try:
-        resp = requests.post(api_url, json=payload, headers=headers)
-        if resp.status_code == 200:
-            job_id = resp.json().get("job_id")
-            if job_id:
-                return dcc.Loading(f"Submission started. Job ID: {job_id}"), job_id, False, env, room_id
-            else:
-                return html.P(f"Submission failed: {resp.text}", style={"color": "red"}), \
-                    dash.no_update, True, dash.no_update, dash.no_update
-        else:
-            return html.P(f"Submission failed: {resp.text}", style={"color": "red"}), \
-                dash.no_update, True, dash.no_update, dash.no_update
-    except Exception as e:
-        return html.P(f"Error: {e}", style={"color": "red"}), \
-            dash.no_update, True, dash.no_update, dash.no_update
+        url = f"{BACKEND_API_URL}/submit-to-biosamples"
+        r = requests.post(url, json=body, timeout=600)
 
+        if not r.ok:
+            msg = html.Span(
+                f"Submission failed [{r.status_code}]: {r.text}",
+                style={"color": "#c62828", "fontWeight": 500},
+            )
+            return msg, dash.no_update
 
-@app.callback(
-    [Output("submission-status", "data"),
-     Output("biosamples-status-banner", "children"),
-     Output("biosamples-status-banner", "style")],
-    [Input("submission-poller", "n_intervals")],
-    [State("submission-job-id", "data"),
-     State("submission-env", "data"),
-     State("submission-room-id", "data")]
-)
-def poll_submission_status(n, job_id, env, room_id):
-    if not job_id:
-        raise PreventUpdate
+        data = r.json() if r.content else {}
 
-    status_url = f"{BACKEND_API_URL}/submit/status/{room_id}"
-    try:
-        resp = requests.get(status_url)
-        if resp.status_code == 200:
-            status_data = resp.json()
-            status = status_data.get("status", "unknown")
-            msg = status_data.get("message", "")
+        success = data.get("success", False)
+        message = data.get("message", "No message from server")
+        submitted_count = data.get("submitted_count")
+        errors = data.get("errors") or []
+        biosamples_ids = data.get("biosamples_ids") or {}
 
-            banner_style = {"padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px"}
-            if status == "running":
-                banner_style.update({"backgroundColor": "#e3f2fd", "color": "#1e88e5"})
-                return status, msg, banner_style
-            elif status == "done":
-                banner_style.update({"backgroundColor": "#e8f5e9", "color": "#43a047"})
-                return status, msg, banner_style
-            elif status == "error":
-                banner_style.update({"backgroundColor": "#ffebee", "color": "#e53935"})
-                return status, msg, banner_style
-            else:
-                return status, msg, {"display": "none"}
-        else:
-            return "error", f"Error fetching status: {resp.text}", {"display": "none"}
-    except Exception as e:
-        return "error", f"Error: {e}", {"display": "none"}
+        color = "#388e3c" if success else "#c62828"
 
+        msg_children = [html.Span(message, style={"fontWeight": 500})]
+        if submitted_count is not None:
+            msg_children += [
+                html.Br(),
+                html.Span(f"Submitted samples: {submitted_count}"),
+            ]
+        if errors:
+            msg_children += [
+                html.Br(),
+                html.Ul(
+                    [html.Li(e) for e in errors],
+                    style={"marginTop": "6px", "color": "#c62828"},
+                ),
+            ]
 
-@app.callback(
-    Output("biosamples-results-table", "children"),
-    [Input("submission-status", "data")],
-    [State("submission-room-id", "data")]
-)
-def display_submission_results(status, room_id):
-    if status != "done":
-        raise PreventUpdate
+        msg = html.Div(msg_children, style={"color": color})
 
-    results_url = f"{BACKEND_API_URL}/submit/results/{room_id}"
-    try:
-        resp = requests.get(results_url)
-        if resp.status_code == 200:
-            results = resp.json()
-            if not results:
-                return html.P("No results available.")
+        if biosamples_ids:
+            table_data = [
+                {"Sample Name": name, "BioSample ID": acc}
+                for name, acc in biosamples_ids.items()
+            ]
 
-            df = pd.DataFrame(results)
-            return DataTable(
-                data=df.to_dict("records"),
-                columns=[{"name": i, "id": i} for i in df.columns],
+            for row in table_data:
+                acc = row.get("BioSample ID")
+                if acc:
+                    row[
+                        "BioSample ID"
+                    ] = f"[{acc}](https://www.ebi.ac.uk/biosamples/samples/{acc})"
+
+            table = dash_table.DataTable(
+                data=table_data,
+                columns=[
+                    {"name": "Sample Name", "id": "Sample Name"},
+                    {
+                        "name": "BioSample ID",
+                        "id": "BioSample ID",
+                        "presentation": "markdown",
+                    },
+                ],
                 page_size=10,
                 style_table={"overflowX": "auto"},
-                style_cell={"textAlign": "left", "padding": "6px"},
-                style_header={"fontWeight": "bold", "backgroundColor": "rgb(230, 230, 230)"},
-                style_data_conditional=[{'if': {'row_index': 'odd'}, 'backgroundColor': 'rgb(248, 248, 248)'}]
+                style_cell={"textAlign": "left"},
             )
         else:
-            return html.P(f"Error fetching results: {resp.text}", style={"color": "red"})
+            table = html.Div(
+                "No BioSample accessions returned.",
+                style={"marginTop": "8px", "color": "#555"},
+            )
+
+        return msg, table
+
     except Exception as e:
-        return html.P(f"Error: {e}", style={"color": "red"})
+        msg = html.Span(
+            f"Submission error: {e}",
+            style={"color": "#c62828", "fontWeight": 500},
+        )
+        return msg, dash.no_update
 
 
 @app.callback(
-    [Output('dummy-output-for-reset', 'children'),
-     Output('stored-file-data', 'data', allow_duplicate=True),
-     Output('stored-filename', 'data', allow_duplicate=True),
-     Output('file-chosen-text', 'children', allow_duplicate=True),
-     Output('selected-file-display', 'children', allow_duplicate=True),
-     Output('selected-file-display', 'style', allow_duplicate=True),
-     Output('output-data-upload', 'children', allow_duplicate=True),
-     Output('stored-all-sheets-data', 'data', allow_duplicate=True),
-     Output('stored-sheet-names', 'data', allow_duplicate=True),
-     Output('stored-parsed-json', 'data', allow_duplicate=True),
-     Output('active-sheet', 'data', allow_duplicate=True),
-     Output('stored-json-validation-results', 'data', allow_duplicate=True),
-     Output('validate-button', 'disabled', allow_duplicate=True),
-     Output('validate-button-container', 'style', allow_duplicate=True),
-     Output('reset-button-container', 'style', allow_duplicate=True)],
-    [Input('reset-button', 'n_clicks')],
-    prevent_initial_call=True
+    Output("biosamples-form-mount", "children", allow_duplicate=True),
+    Input("upload-data", "contents"),
+    prevent_initial_call=True,
+)
+def _clear_biosamples_form_on_new_upload(_):
+    return []
+
+
+app.clientside_callback(
+    """
+    function(n_clicks) {
+        if (n_clicks > 0) {
+            window.location.reload();
+        }
+        return '';
+    }
+    """,
+    Output("dummy-output-for-reset", "children"),
+    [Input("reset-button", "n_clicks")],
+    prevent_initial_call=True,
+)
+
+# Clientside callback to style tab labels when validation results are updated
+app.clientside_callback(
+    """
+    function(validation_results) {
+        if (!validation_results) {
+            return window.dash_clientside.no_update;
+        }
+
+        // Function to style tab labels
+        function styleTabLabels() {
+            const tabContainer = document.getElementById('sample-type-tabs');
+            if (!tabContainer) {
+                return;
+            }
+
+            // Try multiple selectors to find tab elements
+            let tabLabels = tabContainer.querySelectorAll('[role="tab"]');
+            if (tabLabels.length === 0) {
+                tabLabels = tabContainer.querySelectorAll('.tab, [class*="tab"], [class*="Tab"], div[class*="tab"]');
+            }
+            if (tabLabels.length === 0) {
+                tabLabels = tabContainer.querySelectorAll('div, button, a, span');
+            }
+
+            tabLabels.forEach((tab) => {
+                let textElement = tab;
+                let originalText = tab.textContent || tab.innerText || '';
+
+                // Check children for text
+                if (tab.children && tab.children.length > 0) {
+                    for (let child of Array.from(tab.children)) {
+                        const childText = child.textContent || child.innerText || '';
+                        if (childText && (childText.includes('valid') || childText.includes('invalid'))) {
+                            textElement = child;
+                            originalText = childText;
+                            break;
+                        }
+                    }
+                }
+
+                if (originalText && (originalText.includes('valid') || originalText.includes('invalid'))) {
+                    // Skip if already styled
+                    if (textElement.querySelector && textElement.querySelector('span[style*="color"]')) {
+                        return;
+                    }
+
+                    // Create styled version
+                    const styled = originalText.replace(
+                        /(\\d+)\\s+valid/g, 
+                        '<span style="color: #4CAF50 !important; font-weight: bold !important;">$1 valid</span>'
+                    ).replace(
+                        /(\\d+)\\s+invalid/g, 
+                        '<span style="color: #f44336 !important; font-weight: bold !important;">$1 invalid</span>'
+                    );
+
+                    if (styled !== originalText && styled.includes('<span')) {
+                        try {
+                            textElement.innerHTML = styled;
+                        } catch (e) {
+                            console.error('Error styling tab:', e);
+                        }
+                    }
+                }
+            });
+        }
+
+        // Run after delays to ensure DOM is ready
+        setTimeout(styleTabLabels, 100);
+        setTimeout(styleTabLabels, 500);
+        setTimeout(styleTabLabels, 1000);
+
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('validation-results-container', 'children', allow_duplicate=True),
+    [Input('stored-json-validation-results', 'data')],
+    prevent_initial_call='initial_duplicate'
 )
 def reset_app_state(n_clicks):
     if n_clicks > 0:
@@ -2211,4 +2353,4 @@ def reset_app_state(n_clicks):
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=8052)
+    app.run(debug=True, port=8050)
