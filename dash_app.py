@@ -2353,4 +2353,6 @@ def reset_app_state(n_clicks):
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=8050)
+    port = int(os.environ.get('PORT', 8050))
+    debug = os.environ.get('ENVIRONMENT', 'development') != 'production'
+    app.run(host='0.0.0.0', port=port, debug=debug)
