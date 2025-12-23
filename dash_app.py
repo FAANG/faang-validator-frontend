@@ -1,3 +1,4 @@
+import json
 import os
 import base64
 import io
@@ -9,10 +10,11 @@ from dash.dependencies import Input, Output, State, MATCH, ALL
 import pandas as pd
 from dash.exceptions import PreventUpdate
 from typing import List, Dict, Any
+from json_converter import process_headers, build_json_data
 
 # Backend API URL - can be configured via environment variable
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
-                                 'https://faang-validator-backend-service-964531885708.europe-west2.run.app')
+                                 'http://localhost:8000')
 
 # Initialize the Dash app
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
@@ -51,157 +53,10 @@ app.index_string = '''
 '''
 
 
-def process_headers(headers: List[str]) -> List[str]:
-    """Process headers according to the rules for duplicates."""
-    new_headers = []
-    i = 0
-    while i < len(headers):
-        h = headers[i]
-
-        # Case 1: Header contains a period (.)
-        if '.' in h and new_headers:
-            # Concatenate with the previous header name
-            prev_header = new_headers[-1]
-            new_header = h.split('.')[0]
-            new_headers.append(f"{prev_header} {new_header}")
-        # Case 2: Consecutive duplicates
-        elif i + 1 < len(headers) and headers[i + 1] == h:
-            new_headers.append(h)
-            while i + 1 < len(headers) and headers[i + 1] == h:
-                i += 1
-                new_headers.append(h)
-        else:
-            # Case 3: Non-consecutive duplicate
-            if h in new_headers:
-                # Concatenate with the last header name
-                last_header = new_headers[-1] if new_headers else ""
-                new_headers.append(f"{last_header}_{h}")
-            else:
-                new_headers.append(h)
-        i += 1
-    return new_headers
 
 
-def build_json_data(headers: List[str], rows: List[List[str]]) -> List[Dict[str, Any]]:
-    """
-    Build JSON structure from processed headers and rows.
-    Only include 'Health Status' if it exists in the headers.
-    Always treat 'Child Of', 'Specimen Picture URL', and 'Derived From' as lists.
-    """
-    grouped_data = []
-    has_health_status = any(h.startswith("Health Status") for h in headers)
-    has_cell_type = any(h.startswith("Cell Type") for h in headers)
-    has_child_of = any(h == "Child Of" for h in headers)
-    has_specimen_picture_url = any(h == "Specimen Picture URL" for h in headers)
-    has_derived_from = any(h == "Derived From" for h in headers)
 
-    for row in rows:
-        record: Dict[str, Any] = {}
-        if has_health_status:
-            record["Health Status"] = []
-        if has_cell_type:
-            record["Cell Type"] = []
-        if has_child_of:
-            record["Child Of"] = []
-        if has_specimen_picture_url:
-            record["Specimen Picture URL"] = []
-        if has_derived_from:
-            record["Derived From"] = []
 
-        i = 0
-        while i < len(headers):
-            col = headers[i]
-            val = row[i] if i < len(row) else ""
-
-            # Convert val to string, handling NaN and None
-            if pd.isna(val) or val is None:
-                val = ""
-            else:
-                val = str(val).strip()
-
-            if has_health_status and col.startswith("Health Status"):
-                # Skip if this header also contains "Term Source ID" (it's a processed header from process_headers)
-                # In that case, it was already handled when we processed the previous "Health Status" column
-                if "Term Source ID" in col:
-                    i += 1
-                    continue
-                
-                # Check next column for Term Source ID
-                if i + 1 < len(headers) and "Term Source ID" in headers[i + 1]:
-                    term_val = row[i + 1] if i + 1 < len(row) else ""
-                    if pd.isna(term_val) or term_val is None:
-                        term_val = ""
-                    else:
-                        term_val = str(term_val).strip()
-
-                    # Ensure we're using the correct values: val should be text, term_val should be term
-                    record["Health Status"].append({
-                        "text": val,  # Current column value is the health status text
-                        "term": term_val  # Next column value is the term source ID
-                    })
-                    i += 2  # Skip both Health Status and Term Source ID columns
-                else:
-                    # No Term Source ID following, just use the text value
-                    if val:
-                        record["Health Status"].append({
-                            "text": val,
-                            "term": ""
-                        })
-                    i += 1
-                continue
-
-            if has_cell_type and col.startswith("Cell Type"):
-                # Check next column for Term Source ID
-                if i + 1 < len(headers) and "Term Source ID" in headers[i + 1]:
-                    term_val = row[i + 1] if i + 1 < len(row) else ""
-                    if pd.isna(term_val) or term_val is None:
-                        term_val = ""
-                    else:
-                        term_val = str(term_val).strip()
-
-                    record["Cell Type"].append({
-                        "text": val,
-                        "term": term_val
-                    })
-                    i += 2
-                else:
-                    if val:
-                        record["Cell Type"].append({
-                            "text": val,
-                            "term": ""
-                        })
-                    i += 1
-                continue
-
-            elif has_child_of and col.startswith("Child Of"):
-                if val:  # Only append non-empty values
-                    record["Child Of"].append(val)
-                i += 1
-                continue
-
-            elif has_specimen_picture_url and col.startswith("Specimen Picture URL"):
-                if val:  # Only append non-empty values
-                    record["Specimen Picture URL"].append(val)
-                i += 1
-                continue
-
-            elif has_derived_from and col.startswith("Derived From"):
-                if val:  # Only append non-empty values
-                    record["Derived From"].append(val)
-                i += 1
-                continue
-
-            if col in record:
-                if not isinstance(record[col], list):
-                    record[col] = [record[col]]
-                record[col].append(val)
-            else:
-                record[col] = val
-            i += 1
-
-        grouped_data.append(record)
-
-    return grouped_data
 
 
 def _warnings_by_field(warnings_list):
@@ -244,8 +99,53 @@ def _flatten_data_rows(rows, include_errors=False):
                         elif term:
                             health_statuses.append(term)
                 processed_fields[key] = ", ".join(health_statuses)
-            elif key == "Child Of" and isinstance(value, list):
+            elif key == "Cell Type" and isinstance(value, list) and value:
+                cell_types = []
+                for cell_type in value:
+                    if isinstance(cell_type, dict):
+                        text = cell_type.get("text", "")
+                        term = cell_type.get("term", "")
+                        if text and term:
+                            cell_types.append(f"{text} ({term})")
+                        elif text:
+                            cell_types.append(text)
+                        elif term:
+                            cell_types.append(term)
+                processed_fields[key] = ", ".join(cell_types)
+            # Experiment Target and chip target → format as "text (term)"
+            elif key in {"Experiment Target", "experiment target", "chip target"} and isinstance(value, dict):
+                text = value.get("text", "")
+                term = value.get("term", "")
+                if text and term:
+                    processed_fields[key] = f"{text} ({term})"
+                elif text:
+                    processed_fields[key] = text
+                elif term:
+                    processed_fields[key] = term
+                else:
+                    processed_fields[key] = ""
+            # Simple list fields → comma‑separated string
+            elif key in {
+                "Child Of",
+                "Specimen Picture URL",
+                "Derived From",
+                "Secondary Project",
+                "File Names",
+                "File Types",
+                "Checksum Methods",
+                "Checksums",
+                "Samples",
+                "Experiments",
+                "Runs",
+            } and isinstance(value, list):
                 processed_fields[key] = ", ".join(str(item) for item in value if item)
+            # List of objects with `value` → join their values
+            elif key in {"experiment type", "platform"} and isinstance(value, list):
+                processed_fields[key] = ", ".join(
+                    str(item.get("value"))
+                    for item in value
+                    if isinstance(item, dict) and item.get("value")
+                )
             elif not isinstance(value, (str, int, float, bool, type(None))):
                 processed_fields[key] = str(value) if value else ""
             else:
@@ -487,11 +387,11 @@ app.layout = html.Div([
         html.Div(id='dummy-output-for-reset'),
         dcc.Store(id='stored-file-data'),
         dcc.Store(id='stored-filename'),
-        dcc.Store(id='stored-all-sheets-data'),
-        dcc.Store(id='stored-sheet-names'),
         dcc.Store(id='stored-parsed-json'),  # Store parsed JSON from Excel for backend
         dcc.Store(id='error-popup-data', data={'visible': False, 'column': '', 'error': ''}),
         dcc.Store(id='active-sheet', data=None),
+        dcc.Store(id='stored-all-sheets-data'),
+        dcc.Store(id='stored-sheet-names'),
         dcc.Store(id='stored-json-validation-results', data=None),
         # Stores for Experiments tab
         dcc.Store(id='stored-file-data-experiments'),
@@ -901,7 +801,8 @@ def store_file_data(contents, filename):
                 rows.append(row_list)
             
             # Apply build_json_data rules with processed headers
-            parsed_json_records = build_json_data(processed_headers, rows)
+            # Pass sheet name so analysis/experiment-specific logic can run
+            parsed_json_records = build_json_data(processed_headers, rows, sheet_name=sheet)
             parsed_json_data[sheet] = parsed_json_records
             sheets_with_data.append(sheet)
 
@@ -955,6 +856,7 @@ def store_file_data(contents, filename):
                                                              'margin': '20px 0'}, [], None, None, None, None
 
 
+
 # Callback to show and enable validate button when a file is uploaded
 @app.callback(
     [Output('validate-button', 'disabled'),
@@ -992,6 +894,7 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
     invalid_count = 0
     all_sheets_validation_data = {}
     json_validation_results = None
+    print(json.dumps(parsed_json))
 
     try:
         try:
@@ -1179,7 +1082,7 @@ def store_file_data_experiments(contents, filename):
                 rows.append(row_list)
             
             # Apply build_json_data rules with processed headers
-            parsed_json_records = build_json_data(processed_headers, rows)
+            parsed_json_records = build_json_data(processed_headers, rows, sheet_name=sheet)
             parsed_json_data[sheet] = parsed_json_records
             sheets_with_data.append(sheet)
 
@@ -1264,6 +1167,7 @@ def validate_data_experiments(n_clicks, contents, filename, current_children, al
 
     error_data = []
     all_sheets_validation_data = {}
+    print(json.dumps(parsed_json))
 
     try:
         try:
@@ -1446,7 +1350,7 @@ def store_file_data_analysis(contents, filename):
                 rows.append(row_list)
             
             # Apply build_json_data rules with processed headers
-            parsed_json_records = build_json_data(processed_headers, rows)
+            parsed_json_records = build_json_data(processed_headers, rows, sheet_name=sheet)
             parsed_json_data[sheet] = parsed_json_records
             sheets_with_data.append(sheet)
 
@@ -1535,6 +1439,7 @@ def validate_data_analysis(n_clicks, contents, filename, current_children, all_s
     invalid_count = 0
     all_sheets_validation_data = {}
     json_validation_results = None
+    print(json.dumps(parsed_json))
 
     try:
         try:
