@@ -63,11 +63,11 @@ def build_json_data(headers: List[str], rows: List[List[str]], sheet_name: str =
     has_specimen_picture_url = any(h == "Specimen Picture URL" for h in headers)
     has_derived_from = any(h == "Derived From" for h in headers)
     # Experiment fields
-    has_chip_target = any(h.lower().startswith("chip target") for h in headers)
-    has_experiment_target = any(h.lower().startswith("experiment target") for h in headers)
+    has_chip_target = any(h.lower().startswith("Chip Target") for h in headers)
+    has_experiment_target = any(h.lower().startswith("Experiment Target") for h in headers)
     # Analysis fields
-    has_experiment_type = any(h.startswith("experiment type") for h in headers)
-    has_platform = any(h.startswith("platform") for h in headers)
+    has_experiment_type = any(h.startswith("Experiment Type") for h in headers)
+    has_platform = any(h.startswith("Platform") for h in headers)
     has_secondary_project = any(h.startswith("Secondary Project") for h in headers)
     # Secondary Project should be a list only for analysis/experiment sheets
     has_secondary_project_as_list = is_analysis_or_experiment_sheet and has_secondary_project
@@ -93,13 +93,11 @@ def build_json_data(headers: List[str], rows: List[List[str]], sheet_name: str =
         if has_derived_from:
             record["Derived From"] = []
         if has_chip_target:
-            record["chip target"] = {}
-        if has_experiment_target:
-            record["experiment target"] = {}
+            record["Chip Target"] = {}
         if has_experiment_type:
-            record["experiment type"] = []
+            record["Experiment Type"] = []
         if has_platform:
-            record["platform"] = []
+            record["Platform"] = []
         if has_secondary_project_as_list:
             record["Secondary Project"] = []
         if has_file_names:

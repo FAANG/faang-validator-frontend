@@ -464,6 +464,7 @@ app.layout = html.Div([
         html.H1("FAANG Validation"),
         html.Div(id='dummy-output-for-reset'),
         html.Div(id='dummy-output-for-reset-experiments'),
+        html.Div(id='dummy-output-for-reset-analysis'),
         # Stores for Samples tab
         dcc.Store(id='stored-file-data'),
         dcc.Store(id='stored-filename'),
@@ -486,6 +487,15 @@ app.layout = html.Div([
         dcc.Store(id='error-popup-data-experiments', data={'visible': False, 'column': '', 'error': ''}),
         dcc.Store(id='active-sheet-experiments', data=None),
         dcc.Store(id='stored-json-validation-results-experiments', data=None),
+        # Stores for Analysis tab
+        dcc.Store(id='stored-file-data-analysis'),
+        dcc.Store(id='stored-filename-analysis'),
+        dcc.Store(id='stored-all-sheets-data-analysis'),
+        dcc.Store(id='stored-sheet-names-analysis'),
+        dcc.Store(id='stored-parsed-json-analysis'),
+        dcc.Store(id='error-popup-data-analysis', data={'visible': False, 'column': '', 'error': ''}),
+        dcc.Store(id='active-sheet-analysis', data=None),
+        dcc.Store(id='stored-json-validation-results-analysis', data=None),
         dcc.Download(id='download-table-csv'),
         dcc.Interval(id="submission-poller", interval=2000, n_intervals=0, disabled=True),
         html.Div(
@@ -574,7 +584,7 @@ app.layout = html.Div([
                         'fontWeight': 'bold',
                         'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
                     }, children=[
-                    html.Div([], style={'margin': '20px 0'})
+                    create_tab_content('analysis')
                 ])
         ], style={'margin': '20px 0', 'border': 'none', 'borderBottom': '2px solid #e0e0e0'},
             colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"})
@@ -2282,6 +2292,10 @@ def reset_app_state(n_clicks):
 # Register experiments tab callbacks
 from experiments_tab import register_experiments_callbacks
 register_experiments_callbacks(app)
+
+# Register analysis tab callbacks
+from analysis_tab import register_analysis_callbacks
+register_analysis_callbacks(app)
 
 
 if __name__ == '__main__':

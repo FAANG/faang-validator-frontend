@@ -263,7 +263,7 @@ def create_tab_content(tab_type: str):
     Create complete tab content with all components.
     
     Args:
-        tab_type: 'samples' or 'experiments'
+        tab_type: 'samples', 'experiments', or 'analysis'
     
     Returns:
         HTML Div containing all tab components
@@ -272,6 +272,9 @@ def create_tab_content(tab_type: str):
     if tab_type == 'experiments':
         from experiments_tab import create_biosamples_form_experiments
         biosamples_form = create_biosamples_form_experiments()
+    elif tab_type == 'analysis':
+        from analysis_tab import create_biosamples_form_analysis
+        biosamples_form = create_biosamples_form_analysis()
     else:
         biosamples_form = create_biosamples_form(tab_type)
     

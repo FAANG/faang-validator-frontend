@@ -1,6 +1,6 @@
 """
-Experiments tab callbacks and UI components for FAANG Validator.
-This module contains all experiments-specific functionality.
+Analysis tab callbacks and UI components for FAANG Validator.
+This module contains all analysis-specific functionality.
 """
 import json
 import base64
@@ -17,20 +17,20 @@ import os
 from file_processor import process_headers, build_json_data
 
 
-def create_biosamples_form_experiments():
+def create_biosamples_form_analysis():
     """
-    Create BioSamples submission form specifically for experiments tab.
+    Create BioSamples submission form specifically for analysis tab.
     
     Returns:
-        HTML Div containing BioSamples form for experiments
+        HTML Div containing BioSamples form for analysis
     """
     return html.Div(
         [
-            html.H2("Submit data to ENA", style={"marginBottom": "14px"}),
+            html.H2("Prepare data for submission", style={"marginBottom": "14px"}),
 
             html.Label("Username", style={"fontWeight": 600}),
             dcc.Input(
-                id="biosamples-username-ena",
+                id="biosamples-username-ena-analysis",
                 type="text",
                 placeholder="Webin username",
                 style={
@@ -49,7 +49,7 @@ def create_biosamples_form_experiments():
 
             html.Label("Password", style={"fontWeight": 600}),
             dcc.Input(
-                id="biosamples-password-ena",
+                id="biosamples-password-ena-analysis",
                 type="password",
                 placeholder="Password",
                 style={
@@ -60,7 +60,7 @@ def create_biosamples_form_experiments():
             ),
 
             # dcc.RadioItems(
-            #     id="biosamples-env-ena",
+            #     id="biosamples-env-ena-analysis",
             #     options=[{"label": " Test server", "value": "test"},
             #              {"label": " Production server", "value": "prod"}],
             #     value="test",
@@ -68,142 +68,26 @@ def create_biosamples_form_experiments():
             #     style={"marginBottom": "16px"}
             # ),
 
-            html.Div(id="biosamples-status-banner-ena",
+            html.Div(id="biosamples-status-banner-ena-analysis",
                      style={"display": "none", "padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px"}),
 
             html.Button(
-                "Submit", id="biosamples-submit-btn-ena", n_clicks=0,
+                "Submit", id="biosamples-submit-btn-ena-analysis", n_clicks=0,
                 style={
                     "backgroundColor": "#673ab7", "color": "white", "padding": "10px 18px",
                     "border": "none", "borderRadius": "8px", "cursor": "pointer",
                     "fontSize": "16px", "width": "140px"
                 }
             ),
-            html.Div(id="biosamples-submit-msg-ena", style={"marginTop": "10px"}),
+            html.Div(id="biosamples-submit-msg-ena-analysis", style={"marginTop": "10px"}),
         ],
-        id="biosamples-form-ena",
+        id="biosamples-form-ena-analysis",
         style={"display": "none", "marginTop": "16px"},
     )
 
 # Backend API URL - can be configured via environment variable
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
                                  'https://faang-validator-backend-service-964531885708.europe-west2.run.app')
-
-
-# Shared utility functions (copied to avoid circular imports)
-# def process_headers(headers):
-#     """Process headers according to the rules for duplicates."""
-#     new_headers = []
-#     i = 0
-#     while i < len(headers):
-#         h = headers[i]
-#         if '.' in h and new_headers:
-#             prev_header = new_headers[-1]
-#             new_header = h.split('.')[0]
-#             new_headers.append(f"{prev_header} {new_header}")
-#         elif i + 1 < len(headers) and headers[i + 1] == h:
-#             new_headers.append(h)
-#             while i + 1 < len(headers) and headers[i + 1] == h:
-#                 i += 1
-#                 new_headers.append(h)
-#         else:
-#             if h in new_headers:
-#                 last_header = new_headers[-1] if new_headers else ""
-#                 new_headers.append(f"{last_header}_{h}")
-#             else:
-#                 new_headers.append(h)
-#         i += 1
-#     return new_headers
-#
-#
-# def build_json_data(headers, rows):
-#     """Build JSON structure from processed headers and rows."""
-#     grouped_data = []
-#     has_health_status = any("Health Status" in h for h in headers)
-#     has_cell_type = any("Cell Type" in h for h in headers)
-#     has_child_of = any("Child Of" in h for h in headers)
-#     has_specimen_picture_url = any("Specimen Picture URL" in h for h in headers)
-#     has_derived_from = any("Derived From" in h for h in headers)
-#
-#     for row in rows:
-#         record = {}
-#         if has_health_status:
-#             record["Health Status"] = []
-#         if has_cell_type:
-#             record["Cell Type"] = []
-#         if has_child_of:
-#             record["Child Of"] = []
-#         if has_specimen_picture_url:
-#             record["Specimen Picture URL"] = []
-#         if has_derived_from:
-#             record["Derived From"] = []
-#
-#         i = 0
-#         while i < len(headers):
-#             col = headers[i]
-#             val = row[i] if i < len(row) else ""
-#             if pd.isna(val) or val is None:
-#                 val = ""
-#             else:
-#                 val = str(val).strip()
-#
-#             if has_health_status and "Health Status" in col:
-#                 if i + 1 < len(headers) and "Term Source ID" in headers[i + 1]:
-#                     term_val = row[i + 1] if i + 1 < len(row) else ""
-#                     if pd.isna(term_val) or term_val is None:
-#                         term_val = ""
-#                     else:
-#                         term_val = str(term_val).strip()
-#                     record["Health Status"].append({"text": val, "term": term_val})
-#                     i += 2
-#                 else:
-#                     if val:
-#                         record["Health Status"].append({"text": val, "term": ""})
-#                     i += 1
-#                 continue
-#
-#             if has_cell_type and "Cell Type" in col:
-#                 if i + 1 < len(headers) and "Term Source ID" in headers[i + 1]:
-#                     term_val = row[i + 1] if i + 1 < len(row) else ""
-#                     if pd.isna(term_val) or term_val is None:
-#                         term_val = ""
-#                     else:
-#                         term_val = str(term_val).strip()
-#                     record["Cell Type"].append({"text": val, "term": term_val})
-#                     i += 2
-#                 else:
-#                     if val:
-#                         record["Cell Type"].append({"text": val, "term": ""})
-#                     i += 1
-#                 continue
-#
-#             elif has_child_of and "Child Of" in col:
-#                 if val:
-#                     record["Child Of"].append(val)
-#                 i += 1
-#                 continue
-#             elif has_specimen_picture_url and "Specimen Picture URL" in col:
-#                 if val:
-#                     record["Specimen Picture URL"].append(val)
-#                 i += 1
-#                 continue
-#             elif has_derived_from and "Derived From" in col:
-#                 if val:
-#                     record["Derived From"].append(val)
-#                 i += 1
-#                 continue
-#
-#             if col in record:
-#                 if not isinstance(record[col], list):
-#                     record[col] = [record[col]]
-#                 record[col].append(val)
-#             else:
-#                 record[col] = val
-#             i += 1
-#
-#         grouped_data.append(record)
-#
-#     return grouped_data
 
 
 def get_all_errors_and_warnings(record):
@@ -269,38 +153,38 @@ def _resolve_col(field, cols):
     return field if field in cols else None
 
 
-def _valid_invalid_experiments_counts(v):
-    """Get valid/invalid counts for experiments using experiment_summary"""
+def _valid_invalid_analysis_counts(v):
+    """Get valid/invalid counts for analysis using analysis_summary"""
     try:
-        s = v.get("results", {}).get("experiment_summary", {}) or {}
-        return int(s.get("valid_experiments", 0)), int(s.get("invalid_experiments", 0))
+        s = v.get("results", {}).get("analysis_summary", {}) or {}
+        return int(s.get("valid_analyses", 0)), int(s.get("invalid_analyses", 0))
     except Exception:
         return 0, 0
 
 
-def register_experiments_callbacks(app):
+def register_analysis_callbacks(app):
     """
-    Register all experiments tab callbacks with the Dash app.
+    Register all analysis tab callbacks with the Dash app.
     This function should be called from dash_app.py after the app is created.
     """
     
-    # File upload callback for Experiments tab
+    # File upload callback for Analysis tab
     @app.callback(
-        [Output('stored-file-data-experiments', 'data'),
-         Output('stored-filename-experiments', 'data'),
-         Output('file-chosen-text-experiments', 'children'),
-         Output('selected-file-display-experiments', 'children'),
-         Output('selected-file-display-experiments', 'style'),
-         Output('output-data-upload-experiments', 'children'),
-         Output('stored-all-sheets-data-experiments', 'data'),
-         Output('stored-sheet-names-experiments', 'data'),
-         Output('stored-parsed-json-experiments', 'data'),
-         Output('active-sheet-experiments', 'data')],
-        [Input('upload-data-experiments', 'contents')],
-        [State('upload-data-experiments', 'filename')]
+        [Output('stored-file-data-analysis', 'data'),
+         Output('stored-filename-analysis', 'data'),
+         Output('file-chosen-text-analysis', 'children'),
+         Output('selected-file-display-analysis', 'children'),
+         Output('selected-file-display-analysis', 'style'),
+         Output('output-data-upload-analysis', 'children'),
+         Output('stored-all-sheets-data-analysis', 'data'),
+         Output('stored-sheet-names-analysis', 'data'),
+         Output('stored-parsed-json-analysis', 'data'),
+         Output('active-sheet-analysis', 'data')],
+        [Input('upload-data-analysis', 'contents')],
+        [State('upload-data-analysis', 'filename')]
     )
-    def store_file_data_experiments(contents, filename):
-        """Store uploaded file data for Experiments tab"""
+    def store_file_data_analysis(contents, filename):
+        """Store uploaded file data for Analysis tab"""
         if contents is None:
             return None, None, "No file chosen", [], {'display': 'none'}, [], None, None, None, None
 
@@ -349,7 +233,7 @@ def register_experiments_callbacks(app):
                     row_list = [row[col] for col in df_sheet.columns]
                     rows.append(row_list)
 
-                parsed_json_records = build_json_data(processed_headers, rows)
+                parsed_json_records = build_json_data(processed_headers, rows, sheet_name=sheet)
                 parsed_json_data[sheet] = parsed_json_records
                 sheets_with_data.append(sheet)
 
@@ -357,7 +241,7 @@ def register_experiments_callbacks(app):
             sheet_names = sheets_with_data
 
             file_selected_display = html.Div([
-                html.H3("File Selected", id='original-file-heading-experiments'),
+                html.H3("File Selected", id='original-file-heading-analysis'),
                 html.P(f"File: {filename}", style={'fontWeight': 'bold'})
             ])
 
@@ -369,7 +253,7 @@ def register_experiments_callbacks(app):
             elif len(sheets_with_data) > 1:
                 output_data_upload_children = html.Div([
                     dcc.Tabs(
-                        id='uploaded-sheets-tabs-experiments',
+                        id='uploaded-sheets-tabs-analysis',
                         value=active_sheet,
                         children=[],
                         style={'margin': '20px 0', 'border': 'none'},
@@ -395,35 +279,35 @@ def register_experiments_callbacks(app):
             return contents, filename, filename, error_display, {'display': 'block',
                                                                  'margin': '20px 0'}, [], None, None, None, None
 
-    # Enable/disable validate button for Experiments tab
+    # Enable/disable validate button for Analysis tab
     @app.callback(
-        [Output('validate-button-experiments', 'disabled'),
-         Output('validate-button-container-experiments', 'style'),
-         Output('reset-button-container-experiments', 'style')],
-        [Input('stored-file-data-experiments', 'data')]
+        [Output('validate-button-analysis', 'disabled'),
+         Output('validate-button-container-analysis', 'style'),
+         Output('reset-button-container-analysis', 'style')],
+        [Input('stored-file-data-analysis', 'data')]
     )
-    def show_and_enable_buttons_experiments(file_data):
-        """Show and enable buttons for Experiments tab"""
+    def show_and_enable_buttons_analysis(file_data):
+        """Show and enable buttons for Analysis tab"""
         if file_data is None:
             return True, {'display': 'none', 'marginLeft': '10px'}, {'display': 'none', 'marginLeft': '10px'}
         else:
             return False, {'display': 'block', 'marginLeft': '10px'}, {'display': 'block', 'marginLeft': '10px'}
 
-    # Validation callback for Experiments tab
+    # Validation callback for Analysis tab
     @app.callback(
-        [Output('output-data-upload-experiments', 'children', allow_duplicate=True),
-         Output('stored-json-validation-results-experiments', 'data')],
-        [Input('validate-button-experiments', 'n_clicks')],
-        [State('stored-file-data-experiments', 'data'),
-         State('stored-filename-experiments', 'data'),
-         State('output-data-upload-experiments', 'children'),
-         State('stored-all-sheets-data-experiments', 'data'),
-         State('stored-sheet-names-experiments', 'data'),
-         State('stored-parsed-json-experiments', 'data')],
+        [Output('output-data-upload-analysis', 'children', allow_duplicate=True),
+         Output('stored-json-validation-results-analysis', 'data')],
+        [Input('validate-button-analysis', 'n_clicks')],
+        [State('stored-file-data-analysis', 'data'),
+         State('stored-filename-analysis', 'data'),
+         State('output-data-upload-analysis', 'children'),
+         State('stored-all-sheets-data-analysis', 'data'),
+         State('stored-sheet-names-analysis', 'data'),
+         State('stored-parsed-json-analysis', 'data')],
         prevent_initial_call=True
     )
-    def validate_data_experiments(n_clicks, contents, filename, current_children, all_sheets_data, sheet_names, parsed_json):
-        """Validate data for Experiments tab with robust response handling"""
+    def validate_data_analysis(n_clicks, contents, filename, current_children, all_sheets_data, sheet_names, parsed_json):
+        """Validate data for Analysis tab with robust response handling"""
         if n_clicks is None or parsed_json is None:
             return current_children if current_children else html.Div([]), None
 
@@ -454,35 +338,35 @@ def register_experiments_callbacks(app):
             if isinstance(response_json, dict) and 'results' in response_json:
                 json_validation_results = response_json
                 validation_results = response_json['results']
-                experiment_summary = validation_results.get('experiment_summary', {})
+                analysis_summary = validation_results.get('analysis_summary', {})
                 total_summary = validation_results.get('total_summary', {})
-                # Try experiment_summary first, fallback to total_summary
-                if experiment_summary:
-                    valid_count = experiment_summary.get('valid_experiments', 0)
-                    invalid_count = experiment_summary.get('invalid_experiments', 0)
+                # Try analysis_summary first, fallback to total_summary
+                if analysis_summary:
+                    valid_count = analysis_summary.get('valid_analyses', 0)
+                    invalid_count = analysis_summary.get('invalid_analyses', 0)
                 else:
                     valid_count = total_summary.get('valid_samples', 0)
                     invalid_count = total_summary.get('invalid_samples', 0)
             elif isinstance(response_json, dict):
                 # Backend might return data directly without 'results' wrapper
                 # Try to extract data from various possible structures
-                if 'total_summary' in response_json or 'experiment_summary' in response_json or 'experiment_types_processed' in response_json:
+                if 'total_summary' in response_json or 'analysis_summary' in response_json or 'analysis_types_processed' in response_json:
                     # Data is at top level, wrap it in 'results'
                     json_validation_results = {"results": response_json}
                     validation_results = response_json
-                    experiment_summary = validation_results.get('experiment_summary', {})
+                    analysis_summary = validation_results.get('analysis_summary', {})
                     total_summary = validation_results.get('total_summary', {})
-                    if experiment_summary:
-                        valid_count = experiment_summary.get('valid_experiments', 0)
-                        invalid_count = experiment_summary.get('invalid_experiments', 0)
+                    if analysis_summary:
+                        valid_count = analysis_summary.get('valid_analyses', 0)
+                        invalid_count = analysis_summary.get('invalid_analyses', 0)
                     else:
                         valid_count = total_summary.get('valid_samples', 0)
                         invalid_count = total_summary.get('invalid_samples', 0)
                 else:
                     # Unknown format, try to extract what we can
                     validation_data = response_json
-                    valid_count = validation_data.get('valid_samples', 0) or validation_data.get('valid_experiments', 0) or validation_data.get('valid_submissions', 0)
-                    invalid_count = validation_data.get('invalid_samples', 0) or validation_data.get('invalid_experiments', 0) or validation_data.get('invalid_submissions', 0)
+                    valid_count = validation_data.get('valid_samples', 0) or validation_data.get('valid_analyses', 0) or validation_data.get('valid_submissions', 0)
+                    invalid_count = validation_data.get('invalid_samples', 0) or validation_data.get('invalid_analyses', 0) or validation_data.get('invalid_submissions', 0)
                     error_data = validation_data.get('warnings', [])
 
                     # Try to build a minimal structure
@@ -493,15 +377,15 @@ def register_experiments_callbacks(app):
                                 "invalid_samples": invalid_count
                             },
                             "results_by_type": {},
-                            "experiment_types_processed": []
+                            "analysis_types_processed": []
                         }
                     }
             else:
                 # Old format (list) - convert to new format for consistency
                 validation_data = response_json[0] if isinstance(response_json, list) else response_json
                 records = validation_data.get('validation_result', [])
-                valid_count = validation_data.get('valid_samples', 0) or validation_data.get('valid_experiments', 0)
-                invalid_count = validation_data.get('invalid_samples', 0) or validation_data.get('invalid_experiments', 0)
+                valid_count = validation_data.get('valid_samples', 0) or validation_data.get('valid_analyses', 0)
+                invalid_count = validation_data.get('invalid_samples', 0) or validation_data.get('invalid_analyses', 0)
                 error_data = validation_data.get('warnings', [])
                 all_sheets_validation_data = validation_data.get('all_sheets_data', {})
 
@@ -517,7 +401,7 @@ def register_experiments_callbacks(app):
                             "invalid_samples": invalid_count
                         },
                         "results_by_type": all_sheets_validation_data,
-                        "experiment_types_processed": list(all_sheets_validation_data.keys()) if all_sheets_validation_data else []
+                        "analysis_types_processed": list(all_sheets_validation_data.keys()) if all_sheets_validation_data else []
                     }
                 }
 
@@ -530,8 +414,8 @@ def register_experiments_callbacks(app):
                                                                                                        error_div]), None
 
         validation_components = [
-            dcc.Store(id='stored-error-data-experiments', data=error_data),
-            dcc.Store(id='stored-validation-results-experiments', data={'valid_count': valid_count, 'invalid_count': invalid_count,
+            dcc.Store(id='stored-error-data-analysis', data=error_data),
+            dcc.Store(id='stored-validation-results-analysis', data={'valid_count': valid_count, 'invalid_count': invalid_count,
                                                             'all_sheets_data': all_sheets_validation_data}),
             html.H3("2. Conversion and Validation results"),
 
@@ -542,8 +426,8 @@ def register_experiments_callbacks(app):
                 html.P("Finished", style={'color': 'green', 'fontWeight': 'bold'}),
             ], style={'margin': '10px 0'}),
 
-            html.Div(id='error-table-container-experiments', style={'display': 'none'}),
-            html.Div(id='validation-results-container-experiments', style={'margin': '20px 0'})
+            html.Div(id='error-table-container-analysis', style={'display': 'none'}),
+            html.Div(id='validation-results-container-analysis', style={'margin': '20px 0'})
         ]
 
         if current_children is None:
@@ -553,7 +437,7 @@ def register_experiments_callbacks(app):
         else:
             return html.Div(validation_components + [current_children]), json_validation_results if json_validation_results else {'results': {}}
 
-    # Reset callback for Experiments tab
+    # Reset callback for Analysis tab
     app.clientside_callback(
         """
         function(n_clicks) {
@@ -563,28 +447,28 @@ def register_experiments_callbacks(app):
             return '';
         }
         """,
-        Output("dummy-output-for-reset-experiments", "children"),
-        [Input("reset-button-experiments", "n_clicks")],
+        Output("dummy-output-for-reset-analysis", "children"),
+        [Input("reset-button-analysis", "n_clicks")],
         prevent_initial_call=True,
     )
 
-    # BioSamples form toggle for Experiments tab
+    # BioSamples form toggle for Analysis tab
     @app.callback(
         [
-            Output("biosamples-form-ena", "style"),
-            Output("biosamples-status-banner-ena", "children"),
-            Output("biosamples-status-banner-ena", "style"),
+            Output("biosamples-form-ena-analysis", "style"),
+            Output("biosamples-status-banner-ena-analysis", "children"),
+            Output("biosamples-status-banner-ena-analysis", "style"),
         ],
-        Input("stored-json-validation-results-experiments", "data"),
+        Input("stored-json-validation-results-analysis", "data"),
     )
-    def _toggle_biosamples_form_experiments(v):
-        """Toggle BioSamples form visibility for Experiments tab"""
+    def _toggle_biosamples_form_analysis(v):
+        """Toggle BioSamples form visibility for Analysis tab"""
         base_style = {"display": "block", "marginTop": "16px"}
 
         if not v or "results" not in v:
             return ({"display": "none"}, "", {"display": "none"})
 
-        valid_cnt, invalid_cnt = _valid_invalid_experiments_counts(v)
+        valid_cnt, invalid_cnt = _valid_invalid_analysis_counts(v)
         style_ok = {
             "display": "block",
             "backgroundColor": "#e6f4ea",
@@ -608,7 +492,7 @@ def register_experiments_callbacks(app):
         if valid_cnt > 0:
             msg_children = [
                 html.Span(
-                    f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s)."
+                    f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid analysis/analyses."
                 ),
                 html.Br(),
             ]
@@ -616,44 +500,44 @@ def register_experiments_callbacks(app):
         else:
             return (
                 base_style,
-                f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid sample(s). No valid samples to submit.",
+                f"Validation result: {valid_cnt} valid / {invalid_cnt} invalid analysis/analyses. No valid analyses to submit.",
                 style_warn,
             )
 
-    # BioSamples submit button enable/disable for Experiments tab
+    # BioSamples submit button enable/disable for Analysis tab
     @app.callback(
-        Output("biosamples-submit-btn-ena", "disabled"),
+        Output("biosamples-submit-btn-ena-analysis", "disabled"),
         [
-            Input("biosamples-username-ena", "value"),
-            Input("biosamples-password-ena", "value"),
-            Input("stored-json-validation-results-experiments", "data"),
+            Input("biosamples-username-ena-analysis", "value"),
+            Input("biosamples-password-ena-analysis", "value"),
+            Input("stored-json-validation-results-analysis", "data"),
         ],
     )
-    def _disable_submit_experiments(u, p, v):
-        """Enable/disable submit button for Experiments tab"""
+    def _disable_submit_analysis(u, p, v):
+        """Enable/disable submit button for Analysis tab"""
         if not v or "results" not in v:
             return True
-        valid_cnt, _ = _valid_invalid_experiments_counts(v)
+        valid_cnt, _ = _valid_invalid_analysis_counts(v)
         if valid_cnt == 0:
             return True
         return not (u and p)
 
-    # BioSamples submission for Experiments tab
+    # BioSamples submission for Analysis tab
     @app.callback(
         [
-            Output("biosamples-submit-msg-ena", "children"),
-            Output("biosamples-results-table-experiments", "children"),
+            Output("biosamples-submit-msg-ena-analysis", "children"),
+            Output("biosamples-results-table-analysis", "children"),
         ],
-        Input("biosamples-submit-btn-ena", "n_clicks"),
-        State("biosamples-username-ena", "value"),
-        State("biosamples-password-ena", "value"),
-        State("biosamples-env-ena", "value"),
-        State("biosamples-action-experiments", "value"),
-        State("stored-json-validation-results-experiments", "data"),
+        Input("biosamples-submit-btn-ena-analysis", "n_clicks"),
+        State("biosamples-username-ena-analysis", "value"),
+        State("biosamples-password-ena-analysis", "value"),
+        State("biosamples-env-ena-analysis", "value"),
+        State("biosamples-action-analysis", "value"),
+        State("stored-json-validation-results-analysis", "data"),
         prevent_initial_call=True,
     )
-    def _submit_to_biosamples_experiments(n, username, password, env, action, v):
-        """Submit to BioSamples for Experiments tab"""
+    def _submit_to_biosamples_analysis(n, username, password, env, action, v):
+        """Submit to BioSamples for Analysis tab"""
         if not n:
             raise PreventUpdate
 
@@ -664,10 +548,10 @@ def register_experiments_callbacks(app):
             )
             return msg, dash.no_update
 
-        valid_cnt, invalid_cnt = _valid_invalid_experiments_counts(v)
+        valid_cnt, invalid_cnt = _valid_invalid_analysis_counts(v)
         if valid_cnt == 0:
             msg = html.Span(
-                "No valid samples to submit. Please fix errors and re-validate.",
+                "No valid analyses to submit. Please fix errors and re-validate.",
                 style={"color": "#c62828", "fontWeight": 500},
             )
             return msg, dash.no_update
@@ -685,7 +569,7 @@ def register_experiments_callbacks(app):
             "validation_results": validation_results,
             "webin_username": username,
             "webin_password": password,
-            "mode": env,
+            "mode": env or "test",  # Default to test if env is None
             "update_existing": action == "update",
         }
 
@@ -714,7 +598,7 @@ def register_experiments_callbacks(app):
             if submitted_count is not None:
                 msg_children += [
                     html.Br(),
-                    html.Span(f"Submitted samples: {submitted_count}"),
+                    html.Span(f"Submitted analyses: {submitted_count}"),
                 ]
             if errors:
                 msg_children += [
@@ -729,7 +613,7 @@ def register_experiments_callbacks(app):
 
             if biosamples_ids:
                 table_data = [
-                    {"Sample Name": name, "BioSample ID": acc}
+                    {"Analysis Name": name, "BioSample ID": acc}
                     for name, acc in biosamples_ids.items()
                 ]
 
@@ -743,7 +627,7 @@ def register_experiments_callbacks(app):
                 table = dash_table.DataTable(
                     data=table_data,
                     columns=[
-                        {"name": "Sample Name", "id": "Sample Name"},
+                        {"name": "Analysis Name", "id": "Analysis Name"},
                         {
                             "name": "BioSample ID",
                             "id": "BioSample ID",
@@ -771,13 +655,13 @@ def register_experiments_callbacks(app):
 
     # Validation results display callbacks
     @app.callback(
-        Output('validation-results-container-experiments', 'children'),
-        [Input('stored-json-validation-results-experiments', 'data')],
-        [State('stored-sheet-names-experiments', 'data'),
-         State('stored-all-sheets-data-experiments', 'data')]
+        Output('validation-results-container-analysis', 'children'),
+        [Input('stored-json-validation-results-analysis', 'data')],
+        [State('stored-sheet-names-analysis', 'data'),
+         State('stored-all-sheets-data-analysis', 'data')]
     )
-    def populate_validation_results_tabs_experiments(validation_results, sheet_names, all_sheets_data):
-        """Populate validation results tabs for experiments tab"""
+    def populate_validation_results_tabs_analysis(validation_results, sheet_names, all_sheets_data):
+        """Populate validation results tabs for analysis tab"""
         if not validation_results or 'results' not in validation_results:
             return []
 
@@ -786,14 +670,14 @@ def register_experiments_callbacks(app):
 
         validation_data = validation_results['results']
         
-        # Filter sheet_names to only include those in experiment_types_processed
-        experiment_types_processed = validation_data.get('experiment_types_processed', []) or []
-        if experiment_types_processed:
-            # Only show sheets that are in experiment_types_processed
-            sheet_names = [sheet for sheet in sheet_names if sheet in experiment_types_processed]
+        # Filter sheet_names to only include those in analysis_types_processed
+        analysis_types_processed = validation_data.get('analysis_types_processed', []) or []
+        if analysis_types_processed:
+            # Only show sheets that are in analysis_types_processed
+            sheet_names = [sheet for sheet in sheet_names if sheet in analysis_types_processed]
 
-        # Calculate sheet statistics for experiments
-        sheet_stats = _calculate_sheet_statistics_experiments(validation_results, all_sheets_data or {})
+        # Calculate sheet statistics for analysis
+        sheet_stats = _calculate_sheet_statistics_analysis(validation_results, all_sheets_data or {})
 
         sheet_tabs = []
         sheets_with_data = []
@@ -805,7 +689,7 @@ def register_experiments_callbacks(app):
             warnings = stats.get('warning_records', 0)
             valid = stats.get('valid_records', 0)
             
-            # Show all sheets in experiment_types_processed, regardless of errors/warnings
+            # Show all sheets in analysis_types_processed, regardless of errors/warnings
             sheets_with_data.append(sheet_name)
             # Create label showing counts for THIS sheet
             label = f"{sheet_name} ({valid} valid / {errors} invalid)"
@@ -814,7 +698,7 @@ def register_experiments_callbacks(app):
                 dcc.Tab(
                     label=label,
                     value=sheet_name,
-                    id={'type': 'sheet-validation-tab-experiments', 'sheet_name': sheet_name},
+                    id={'type': 'sheet-validation-tab-analysis', 'sheet_name': sheet_name},
                     style={
                         'border': 'none',
                         'padding': '12px 24px',
@@ -837,7 +721,7 @@ def register_experiments_callbacks(app):
                         'fontWeight': 'bold',
                         'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
                     },
-                    children=[html.Div(id={'type': 'sheet-validation-content-experiments', 'index': sheet_name})]
+                    children=[html.Div(id={'type': 'sheet-validation-content-analysis', 'index': sheet_name})]
                 )
             )
 
@@ -849,7 +733,7 @@ def register_experiments_callbacks(app):
             ])
 
         tabs = dcc.Tabs(
-            id='sheet-validation-tabs-experiments',
+            id='sheet-validation-tabs-analysis',
             value=sheets_with_data[0] if sheets_with_data else None,
             children=sheet_tabs,
             style={
@@ -869,7 +753,7 @@ def register_experiments_callbacks(app):
                 html.Div(),
                 html.Button(
                     "Download annotated template",
-                    id="download-errors-btn-experiments",
+                    id="download-errors-btn-analysis",
                     n_clicks=0,
                     style={
                         'backgroundColor': '#ffd740',
@@ -892,26 +776,26 @@ def register_experiments_callbacks(app):
 
         return html.Div([header_bar, tabs], style={"marginTop": "8px"})
 
-    # Callback to populate sheet content when tab is selected for experiments
+    # Callback to populate sheet content when tab is selected for analysis
     @app.callback(
-        Output({'type': 'sheet-validation-content-experiments', 'index': MATCH}, 'children'),
-        [Input('sheet-validation-tabs-experiments', 'value')],
-        [State('stored-json-validation-results-experiments', 'data'),
-         State('stored-all-sheets-data-experiments', 'data')]
+        Output({'type': 'sheet-validation-content-analysis', 'index': MATCH}, 'children'),
+        [Input('sheet-validation-tabs-analysis', 'value')],
+        [State('stored-json-validation-results-analysis', 'data'),
+         State('stored-all-sheets-data-analysis', 'data')]
     )
-    def populate_sheet_validation_content_experiments(selected_sheet_name, validation_results, all_sheets_data):
-        """Populate sheet validation content for experiments tab"""
+    def populate_sheet_validation_content_analysis(selected_sheet_name, validation_results, all_sheets_data):
+        """Populate sheet validation content for analysis tab"""
         if validation_results is None or selected_sheet_name is None:
             return []
 
         if not all_sheets_data or selected_sheet_name not in all_sheets_data:
             return html.Div("No data available for this sheet.")
 
-        return make_sheet_validation_panel_experiments(selected_sheet_name, validation_results, all_sheets_data)
+        return make_sheet_validation_panel_analysis(selected_sheet_name, validation_results, all_sheets_data)
 
 
-def make_sheet_validation_panel_experiments(sheet_name: str, validation_results: dict, all_sheets_data: dict):
-    """Create a panel showing validation results for experiments sheet"""
+def make_sheet_validation_panel_analysis(sheet_name: str, validation_results: dict, all_sheets_data: dict):
+    """Create a panel showing validation results for analysis sheet"""
     import uuid
     panel_id = str(uuid.uuid4())
 
@@ -920,20 +804,20 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
     if not sheet_records:
         return html.Div([html.H4("No data available", style={'textAlign': 'center', 'margin': '10px 0'})])
 
-    # Get validation data - use experiment_types_processed for experiments
+    # Get validation data - use analysis_types_processed for analysis
     validation_data = validation_results.get('results', {})
     results_by_type = validation_data.get('results_by_type', {}) or {}
-    experiment_summary = validation_data.get('experiment_summary', {})
-    experiment_types = validation_data.get('experiment_types_processed', []) or []
+    analysis_summary = validation_data.get('analysis_summary', {})
+    analysis_types = validation_data.get('analysis_types_processed', []) or []
 
     # Get all validation rows for this sheet
-    # For experiments, try "Experiment Alias" first, then "Sample Name"
+    # For analysis, try "Analysis Alias" first, then "Sample Name"
     sheet_sample_names = set()
     for record in sheet_records:
-        exp_alias = str(record.get("Experiment Alias", ""))
+        analysis_alias = str(record.get("Analysis Alias", ""))
         sample_name = str(record.get("Sample Name", ""))
-        if exp_alias:
-            sheet_sample_names.add(exp_alias)
+        if analysis_alias:
+            sheet_sample_names.add(analysis_alias)
         if sample_name:
             sheet_sample_names.add(sample_name)
 
@@ -941,19 +825,19 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
     error_map = {}
     warning_map = {}
 
-    for experiment_type in experiment_types:
-        et_data = results_by_type.get(experiment_type, {}) or {}
-        et_key = experiment_type.replace(' ', '_')
-        invalid_key = f"invalid_{et_key}s"
+    for analysis_type in analysis_types:
+        at_data = results_by_type.get(analysis_type, {}) or {}
+        at_key = analysis_type.replace(' ', '_')
+        invalid_key = f"invalid_{at_key}s"
         if invalid_key.endswith('ss'):
             invalid_key = invalid_key[:-1]
-        valid_key = f"valid_{et_key}s"
+        valid_key = f"valid_{at_key}s"
 
-        invalid_records = et_data.get(invalid_key, [])
-        valid_records = et_data.get(valid_key, [])
+        invalid_records = at_data.get(invalid_key, [])
+        valid_records = at_data.get(valid_key, [])
 
         for record in invalid_records + valid_records:
-            sample_name = record.get("sample_name", "") or record.get("experiment_alias", "")
+            sample_name = record.get("sample_name", "") or record.get("analysis_alias", "")
             if sample_name in sheet_sample_names:
                 errors, warnings = get_all_errors_and_warnings(record)
                 if errors:
@@ -1033,10 +917,10 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
     tooltip_data = []
 
     for i, row in df_all.iterrows():
-        # Try to match by Experiment Alias or Sample Name
-        exp_alias = str(row.get("Experiment Alias", ""))
+        # Try to match by Analysis Alias or Sample Name
+        analysis_alias = str(row.get("Analysis Alias", ""))
         sample_name = str(row.get("Sample Name", ""))
-        match_key = exp_alias if exp_alias else sample_name
+        match_key = analysis_alias if analysis_alias else sample_name
         
         tips = {}
         row_styles = []
@@ -1183,9 +1067,9 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
         )
 
     # Total Summary
-    if experiment_summary:
+    if analysis_summary:
         summary_items = []
-        for key, value in experiment_summary.items():
+        for key, value in analysis_summary.items():
             if isinstance(value, (int, float, str)):
                 display_key = key.replace('_', ' ').title()
                 summary_items.append(
@@ -1217,7 +1101,7 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
         html.H4(f"Validation Results - {sheet_name}", style={'textAlign': 'center', 'margin': '10px 0'}),
         html.Div([
             DataTable(
-                id={"type": "sheet-result-table-experiments", "sheet_name": sheet_name, "panel_id": panel_id},
+                id={"type": "sheet-result-table-analysis", "sheet_name": sheet_name, "panel_id": panel_id},
                 data=df_all.to_dict("records"),
                 columns=columns,
                 page_size=10,
@@ -1228,7 +1112,7 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
                 tooltip_data=tooltip_data,
                 tooltip_duration=None
             )
-        ], id={"type": "sheet-table-container-experiments", "sheet_name": sheet_name, "panel_id": panel_id},
+        ], id={"type": "sheet-table-container-analysis", "sheet_name": sheet_name, "panel_id": panel_id},
             style={'display': 'block'}),
         # Add validation report after the table
         html.Div(
@@ -1247,8 +1131,8 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
     return html.Div(blocks)
 
 
-def _calculate_sheet_statistics_experiments(validation_results, all_sheets_data):
-    """Calculate errors and warnings count for each Excel sheet for experiments"""
+def _calculate_sheet_statistics_analysis(validation_results, all_sheets_data):
+    """Calculate errors and warnings count for each Excel sheet for analysis"""
     sheet_stats = {}
 
     if not validation_results or 'results' not in validation_results:
@@ -1256,7 +1140,7 @@ def _calculate_sheet_statistics_experiments(validation_results, all_sheets_data)
 
     validation_data = validation_results['results']
     results_by_type = validation_data.get('results_by_type', {}) or {}
-    experiment_types = validation_data.get('experiment_types_processed', []) or []
+    analysis_types = validation_data.get('analysis_types_processed', []) or []
 
     # Initialize sheet stats
     if all_sheets_data:
@@ -1269,39 +1153,39 @@ def _calculate_sheet_statistics_experiments(validation_results, all_sheets_data)
                 'sample_status': {}
             }
 
-    # Process each experiment type and map to sheets
-    for experiment_type in experiment_types:
-        et_data = results_by_type.get(experiment_type, {}) or {}
-        et_key = experiment_type.replace(' ', '_')
+    # Process each analysis type and map to sheets
+    for analysis_type in analysis_types:
+        at_data = results_by_type.get(analysis_type, {}) or {}
+        at_key = analysis_type.replace(' ', '_')
 
-        invalid_key = f"invalid_{et_key}s"
+        invalid_key = f"invalid_{at_key}s"
         if invalid_key.endswith('ss'):
             invalid_key = invalid_key[:-1]
-        valid_key = f"valid_{et_key}s"
+        valid_key = f"valid_{at_key}s"
 
-        invalid_records = et_data.get(invalid_key, [])
-        valid_records = et_data.get(valid_key, [])
+        invalid_records = at_data.get(invalid_key, [])
+        valid_records = at_data.get(valid_key, [])
 
         all_records = invalid_records + valid_records
 
         for record in all_records:
-            sample_name = record.get("sample_name", "") or record.get("experiment_alias", "")
+            sample_name = record.get("sample_name", "") or record.get("analysis_alias", "")
             if not sample_name:
                 continue
 
             errors, warnings = get_all_errors_and_warnings(record)
 
             # Find which sheet contains this sample
-            # For experiments, try "Experiment Alias" first, then "Sample Name"
+            # For analysis, try "Analysis Alias" first, then "Sample Name"
             for sheet_name, sheet_records in (all_sheets_data or {}).items():
                 if not sheet_records:
                     continue
                 sheet_sample_names = set()
                 for r in sheet_records:
-                    exp_alias = str(r.get("Experiment Alias", ""))
+                    analysis_alias = str(r.get("Analysis Alias", ""))
                     samp_name = str(r.get("Sample Name", ""))
-                    if exp_alias:
-                        sheet_sample_names.add(exp_alias)
+                    if analysis_alias:
+                        sheet_sample_names.add(analysis_alias)
                     if samp_name:
                         sheet_sample_names.add(samp_name)
                 
