@@ -197,3 +197,30 @@ label {
     text-decoration: none;
     background-color: #ffeeee;
 }
+
+/* Summary container styling */
+.summary-container {
+    padding: 10px;
+    margin-bottom: 20px;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+.summary-container span {
+    margin-right: 20px;
+    padding: 5px 10px;
+    border-radius: 4px;
+    color: white;
+}
+
+.summary-valid {
+    background-color: #4CAF50;
+}
+
+.summary-invalid {
+    background-color: #f44336;
+}
+
+.summary-warning {
+    background-color: #ff9800;
+}

@@ -12,6 +12,7 @@ from dash.dependencies import Input, Output, State, MATCH, ALL
 import pandas as pd
 from dash.exceptions import PreventUpdate
 from typing import List, Dict, Any
+from tab_components import create_tab_content
 
 # Backend API URL - can be configured via environment variable
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
@@ -31,14 +32,22 @@ app.index_string = '''
         {%favicon%}
         {%css%}
         <style>
-            /* Style valid/invalid counts in tab labels */
-            .tab-label-valid {
-                color: #4CAF50;
-                font-weight: bold;
+            @keyframes fadeIn {
+                from { opacity: 0; }
+                to { opacity: 1; }
             }
-            .tab-label-invalid {
-                color: #f44336;
-                font-weight: bold;
+            #sheet-validation-content-wrapper {
+                transition: opacity 0.3s ease-in-out;
+            }
+            /* Style for valid count in tab labels */
+            .valid-count {
+                color: #4CAF50 !important;
+                font-weight: bold !important;
+            }
+            /* Style for invalid count in tab labels */
+            .invalid-count {
+                color: #f44336 !important;
+                font-weight: bold !important;
             }
         </style>
     </head>
@@ -117,7 +126,7 @@ def build_json_data(headers: List[str], rows: List[List[str]]) -> List[Dict[str,
         while i < len(headers):
             col = headers[i]  # Processed header
             val = row[i] if i < len(row) else ""
-            
+
             # Convert val to string, handling NaN and None
             if pd.isna(val) or val is None:
                 val = ""
@@ -174,7 +183,7 @@ def build_json_data(headers: List[str], rows: List[List[str]]) -> List[Dict[str,
                         })
                     i += 1
                 continue
-            
+
             # ✅ Special handling for Child Of headers
             # Check if "Child Of" appears in the column name (handles renamed duplicates)
             elif has_child_of and "Child Of" in col:
@@ -230,11 +239,10 @@ def get_all_errors_and_warnings(record):
                     field_to_blame = 'Child Of'
                 elif 'Derived From' in data and data.get('Derived From'):
                     field_to_blame = 'Derived From'
-                
+
                 if field_to_blame not in errors:
                     errors[field_to_blame] = []
                 errors[field_to_blame].append(message)
-
 
     # From 'field_warnings'
     if 'field_warnings' in record and record['field_warnings']:
@@ -362,8 +370,26 @@ def _collect_valid_records(v):
 
 def _valid_invalid_counts(v):
     try:
-        s = v.get("results", {}).get("total_summary", {}) or {}
-        return int(s.get("valid_samples", 0)), int(s.get("invalid_samples", 0))
+        results = v.get("results", {}) or {}
+
+        experiment_summary = results.get("experiment_summary", {}) or {}
+        if experiment_summary:
+            valid = experiment_summary.get("valid_experiments", 0)
+            invalid = experiment_summary.get("invalid_experiments", 0)
+            if valid > 0 or invalid > 0:
+                return int(valid), int(invalid)
+
+        analysis_summary = results.get("analysis_summary", {}) or {}
+        if analysis_summary:
+            valid = analysis_summary.get("valid_analyses", 0)
+            invalid = analysis_summary.get("invalid_analyses", 0)
+            if valid > 0 or invalid > 0:
+                return int(valid), int(invalid)
+
+        total_summary = results.get("total_summary", {}) or {}
+        valid = total_summary.get("valid_samples", 0)
+        invalid = total_summary.get("invalid_samples", 0)
+        return int(valid), int(invalid)
     except Exception:
         return 0, 0
 
@@ -374,12 +400,12 @@ def _count_total_warnings(v):
         validation_data = v.get("results", {}) or {}
         results_by_type = validation_data.get("results_by_type", {}) or {}
         sample_types = validation_data.get("sample_types_processed", []) or []
-        
+
         total_warnings = 0
         for sample_type in sample_types:
             warning_count = _count_warnings_for_type(v, sample_type)
             total_warnings += warning_count
-        
+
         return total_warnings
     except Exception:
         return 0
@@ -397,9 +423,15 @@ def _count_valid_invalid_for_type(validation_results_dict, sample_type):
         if invalid_key.endswith('ss'):
             invalid_key = invalid_key[:-1]
 
-        v = len(st_data.get(valid_key) or [])
-        iv = len(st_data.get(invalid_key) or [])
-        return v, iv
+        if isinstance(st_data, list):
+            v = sum(1 for item in st_data if not item.get('errors'))
+            iv = sum(1 for item in st_data if item.get('errors'))
+            return v, iv
+        else:
+            v = len(st_data.get(valid_key) or [])
+            iv = len(st_data.get(invalid_key) or [])
+            return v, iv
+
     except Exception:
         return 0, 0
 
@@ -414,86 +446,34 @@ def _count_warnings_for_type(validation_results_dict, sample_type):
 
         valid_key = f"valid_{st_key}s"
         valid_records = st_data.get(valid_key) or []
-        
+
         # Count records that have warnings
         warning_count = 0
         for record in valid_records:
             _, warnings = get_all_errors_and_warnings(record)
             if warnings:
                 warning_count += 1
-        
+
         return warning_count
     except Exception:
         return 0
 
 
+# Legacy function kept for backward compatibility (if needed)
+# New code should use create_tab_content from tab_components
 def biosamples_form():
-    return html.Div(
-        [
-            html.H2("Submit data to BioSamples", style={"marginBottom": "14px"}),
-
-            html.Label("Username", style={"fontWeight": 600}),
-            dcc.Input(
-                id="biosamples-username",
-                type="text",
-                placeholder="Webin username",
-                style={
-                    "width": "100%", "padding": "10px", "borderRadius": "8px",
-                    "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF",
-                    "margin": "6px 0 4px"
-                }
-            ),
-            html.Div(
-                ["Please use Webin ",
-                 html.A("service", href="https://www.ebi.ac.uk/ena/submit/webin/login", target="_blank"),
-                 " to get your credentials"
-                 ],
-                style={"color": "#64748b", "marginBottom": "12px"}
-            ),
-
-            html.Label("Password", style={"fontWeight": 600}),
-            dcc.Input(
-                id="biosamples-password",
-                type="password",
-                placeholder="Password",
-                style={
-                    "width": "100%", "padding": "10px", "borderRadius": "8px",
-                    "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF",
-                    "margin": "6px 0 16px"
-                }
-            ),
-
-            dcc.RadioItems(
-                id="biosamples-env",
-                options=[{"label": " Test server", "value": "test"},
-                         {"label": " Production server", "value": "prod"}],
-                value="test",
-                labelStyle={"marginRight": "18px"},
-                style={"marginBottom": "16px"}
-            ),
-
-            html.Div(id="biosamples-status-banner",
-                     style={"display": "none", "padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px"}),
-
-            html.Button(
-                "Submit", id="biosamples-submit-btn", n_clicks=0,
-                style={
-                    "backgroundColor": "#673ab7", "color": "white", "padding": "10px 18px",
-                    "border": "none", "borderRadius": "8px", "cursor": "pointer",
-                    "fontSize": "16px", "width": "140px"
-                }
-            ),
-            html.Div(id="biosamples-submit-msg", style={"marginTop": "10px"}),
-        ],
-        id="biosamples-form",
-        style={"display": "none", "marginTop": "16px"},
-    )
+    """Legacy function - use create_tab_content from tab_components instead"""
+    from tab_components import create_biosamples_form
+    return create_biosamples_form("samples")
 
 
 app.layout = html.Div([
     html.Div([
         html.H1("FAANG Validation"),
         html.Div(id='dummy-output-for-reset'),
+        html.Div(id='dummy-output-for-reset-experiments'),
+        html.Div(id='dummy-output-for-reset-analysis'),
+        # Stores for Samples tab
         dcc.Store(id='stored-file-data'),
         dcc.Store(id='stored-filename'),
         dcc.Store(id='stored-all-sheets-data'),
@@ -506,6 +486,24 @@ app.layout = html.Div([
         dcc.Store(id="submission-status"),
         dcc.Store(id="submission-env"),
         dcc.Store(id="submission-room-id"),
+        # Stores for Experiments tab
+        dcc.Store(id='stored-file-data-experiments'),
+        dcc.Store(id='stored-filename-experiments'),
+        dcc.Store(id='stored-all-sheets-data-experiments'),
+        dcc.Store(id='stored-sheet-names-experiments'),
+        dcc.Store(id='stored-parsed-json-experiments'),
+        dcc.Store(id='error-popup-data-experiments', data={'visible': False, 'column': '', 'error': ''}),
+        dcc.Store(id='active-sheet-experiments', data=None),
+        dcc.Store(id='stored-json-validation-results-experiments', data=None),
+        # Stores for Analysis tab
+        dcc.Store(id='stored-file-data-analysis'),
+        dcc.Store(id='stored-filename-analysis'),
+        dcc.Store(id='stored-all-sheets-data-analysis'),
+        dcc.Store(id='stored-sheet-names-analysis'),
+        dcc.Store(id='stored-parsed-json-analysis'),
+        dcc.Store(id='error-popup-data-analysis', data={'visible': False, 'column': '', 'error': ''}),
+        dcc.Store(id='active-sheet-analysis', data=None),
+        dcc.Store(id='stored-json-validation-results-analysis', data=None),
         dcc.Download(id='download-table-csv'),
         dcc.Interval(id="submission-poller", interval=2000, n_intervals=0, disabled=True),
         html.Div(
@@ -525,153 +523,76 @@ app.layout = html.Div([
         ),
         dcc.Tabs([
             dcc.Tab(label='Samples', style={
-                    'border': 'none',
-                    'padding': '12px 24px',
-                    'marginRight': '4px',
-                    'backgroundColor': '#f5f5f5',
-                    'color': '#666',
-                    'borderRadius': '8px 8px 0 0',
-                    'fontWeight': '500',
-                    'transition': 'all 0.3s ease',
-                    'cursor': 'pointer'
-                },
+                'border': 'none',
+                'padding': '12px 24px',
+                'marginRight': '4px',
+                'backgroundColor': '#f5f5f5',
+                'color': '#666',
+                'borderRadius': '8px 8px 0 0',
+                'fontWeight': '500',
+                'transition': 'all 0.3s ease',
+                'cursor': 'pointer'
+            },
                     selected_style={
-                    'border': 'none',
-                    'borderBottom': '3px solid #4CAF50',
-                    'backgroundColor': '#ffffff',
-                    'color': '#4CAF50',
-                    'padding': '12px 24px',
-                    'marginRight': '4px',
-                    'borderRadius': '8px 8px 0 0',
-                    'fontWeight': 'bold',
-                    'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
-                }, children=[
-                    html.Div([
-                        html.Label("1. Upload template"),
-                        html.Div([
-                            dcc.Upload(
-                                id='upload-data',
-                                children=html.Div([
-                                    html.Button('Choose File',
-                                                className='upload-button',
-                                                style={
-                                                    'backgroundColor': '#cccccc',
-                                                    'color': 'black',
-                                                    'padding': '10px 20px',
-                                                    'border': 'none',
-                                                    'borderRadius': '4px',
-                                                    'cursor': 'pointer',
-                                                }),
-                                    html.Div('No file chosen', id='file-chosen-text')
-                                ], style={'display': 'flex', 'alignItems': 'center', 'gap': '10px'}),
-                                style={'width': 'auto', 'margin': '10px 0'},
-                                className='upload-area',
-                                multiple=False
-                            ),
-                            html.Div(
-                                html.Button(
-                                    'Validate',
-                                    id='validate-button',
-                                    className='validate-button',
-                                    disabled=True,
-                                    style={
-                                        'backgroundColor': '#4CAF50',
-                                        'color': 'white',
-                                        'padding': '10px 20px',
-                                        'border': 'none',
-                                        'borderRadius': '4px',
-                                        'cursor': 'pointer',
-                                        'fontSize': '16px',
-                                    }
-                                ),
-                                id='validate-button-container',
-                                style={'display': 'none', 'marginLeft': '10px'}
-                            ),
-                            html.Div(
-                                html.Button(
-                                    'Reset',
-                                    id='reset-button',
-                                    n_clicks=0,
-                                    className='reset-button',
-                                    style={
-                                        'backgroundColor': '#f44336',
-                                        'color': 'white',
-                                        'padding': '10px 20px',
-                                        'border': 'none',
-                                        'borderRadius': '4px',
-                                        'cursor': 'pointer',
-                                        'fontSize': '16px',
-                                    }
-                                ),
-                                id='reset-button-container',
-                                style={'display': 'none', 'marginLeft': '10px'}
-                            ),
-                        ], style={'display': 'flex', 'alignItems': 'center'}),
-                        html.Div(
-                            dcc.RadioItems(
-                                id='biosamples-action',
-                                options=[
-                                    {"label": " Submit new sample", "value": "submission"},
-                                    {"label": " Update existing sample", "value": "update"},
-                                ],
-                                value="submission",
-                                labelStyle={"marginRight": "24px"},
-                                style={"marginTop": "12px"}
-                            )
-                        ),
-                        html.Div(id='selected-file-display', style={'display': 'none'}),
-                    ], style={'margin': '20px 0'}),
-                    dcc.Loading(id="loading-validation", type="circle", children=html.Div(id='output-data-upload')),
-                    biosamples_form(),
-                    html.Div(id="biosamples-results-table")
+                        'border': 'none',
+                        'borderBottom': '3px solid #4CAF50',
+                        'backgroundColor': '#ffffff',
+                        'color': '#4CAF50',
+                        'padding': '12px 24px',
+                        'marginRight': '4px',
+                        'borderRadius': '8px 8px 0 0',
+                        'fontWeight': 'bold',
+                        'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
+                    }, children=[
+                    create_tab_content('samples')
                 ]),
             dcc.Tab(label='Experiments', style={
-                    'border': 'none',
-                    'padding': '12px 24px',
-                    'marginRight': '4px',
-                    'backgroundColor': '#f5f5f5',
-                    'color': '#666',
-                    'borderRadius': '8px 8px 0 0',
-                    'fontWeight': '500',
-                    'transition': 'all 0.3s ease',
-                    'cursor': 'pointer'
-                },
+                'border': 'none',
+                'padding': '12px 24px',
+                'marginRight': '4px',
+                'backgroundColor': '#f5f5f5',
+                'color': '#666',
+                'borderRadius': '8px 8px 0 0',
+                'fontWeight': '500',
+                'transition': 'all 0.3s ease',
+                'cursor': 'pointer'
+            },
                     selected_style={
-                    'border': 'none',
-                    'borderBottom': '3px solid #4CAF50',
-                    'backgroundColor': '#ffffff',
-                    'color': '#4CAF50',
-                    'padding': '12px 24px',
-                    'marginRight': '4px',
-                    'borderRadius': '8px 8px 0 0',
-                    'fontWeight': 'bold',
-                    'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
-                }, children=[
-                    html.Div([], style={'margin': '20px 0'})
+                        'border': 'none',
+                        'borderBottom': '3px solid #4CAF50',
+                        'backgroundColor': '#ffffff',
+                        'color': '#4CAF50',
+                        'padding': '12px 24px',
+                        'marginRight': '4px',
+                        'borderRadius': '8px 8px 0 0',
+                        'fontWeight': 'bold',
+                        'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
+                    }, children=[
+                    create_tab_content('experiments')
                 ]),
             dcc.Tab(label='Analysis', style={
-                    'border': 'none',
-                    'padding': '12px 24px',
-                    'marginRight': '4px',
-                    'backgroundColor': '#f5f5f5',
-                    'color': '#666',
-                    'borderRadius': '8px 8px 0 0',
-                    'fontWeight': '500',
-                    'transition': 'all 0.3s ease',
-                    'cursor': 'pointer'
-                },
+                'border': 'none',
+                'padding': '12px 24px',
+                'marginRight': '4px',
+                'backgroundColor': '#f5f5f5',
+                'color': '#666',
+                'borderRadius': '8px 8px 0 0',
+                'fontWeight': '500',
+                'transition': 'all 0.3s ease',
+                'cursor': 'pointer'
+            },
                     selected_style={
-                    'border': 'none',
-                    'borderBottom': '3px solid #4CAF50',
-                    'backgroundColor': '#ffffff',
-                    'color': '#4CAF50',
-                    'padding': '12px 24px',
-                    'marginRight': '4px',
-                    'borderRadius': '8px 8px 0 0',
-                    'fontWeight': 'bold',
-                    'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
-                }, children=[
-                    html.Div([], style={'margin': '20px 0'})
+                        'border': 'none',
+                        'borderBottom': '3px solid #4CAF50',
+                        'backgroundColor': '#ffffff',
+                        'color': '#4CAF50',
+                        'padding': '12px 24px',
+                        'marginRight': '4px',
+                        'borderRadius': '8px 8px 0 0',
+                        'fontWeight': 'bold',
+                        'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
+                    }, children=[
+                    create_tab_content('analysis')
                 ])
         ], style={'margin': '20px 0', 'border': 'none', 'borderBottom': '2px solid #e0e0e0'},
             colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"})
@@ -682,62 +603,77 @@ app.layout = html.Div([
 @app.callback(
     [Output('stored-file-data', 'data'),
      Output('stored-filename', 'data'),
-     Output('file-chosen-text', 'children'),
-     Output('selected-file-display', 'children'),
-     Output('selected-file-display', 'style'),
-     Output('output-data-upload', 'children'),
+     Output('file-chosen-text-samples', 'children'),
+     Output('selected-file-display-samples', 'children'),
+     Output('selected-file-display-samples', 'style'),
+     Output('output-data-upload-samples', 'children'),
      Output('stored-all-sheets-data', 'data'),
      Output('stored-sheet-names', 'data'),
      Output('stored-parsed-json', 'data'),
      Output('active-sheet', 'data')],
-    [Input('upload-data', 'contents')],
-    [State('upload-data', 'filename')]
+    [Input('upload-data-samples', 'contents')],
+    [State('upload-data-samples', 'filename')]
 )
 def store_file_data(contents, filename):
     if contents is None:
         return None, None, "No file chosen", [], {'display': 'none'}, [], None, None, None, None
 
     try:
-        content_type, content_string = contents.split(',')
+        # Handle case where contents might not have comma (shouldn't happen but safety check)
+        if ',' not in contents:
+            raise ValueError("Invalid file format: missing content separator")
+        
+        content_type, content_string = contents.split(',', 1)  # Split only on first comma
+
+        # Validate file type
+        if not filename or not (filename.endswith('.xlsx') or filename.endswith('.xls')):
+            raise ValueError(f"Invalid file type. Please upload an Excel file (.xlsx or .xls). Got: {filename}")
 
         # Parse Excel file to JSON immediately
         # Decode base64 string to bytes
-        decoded = base64.b64decode(content_string)
-        excel_file = pd.ExcelFile(io.BytesIO(decoded), engine="openpyxl")
+        try:
+            decoded = base64.b64decode(content_string)
+        except Exception as e:
+            raise ValueError(f"Error decoding file: {str(e)}")
+        
+        try:
+            excel_file = pd.ExcelFile(io.BytesIO(decoded), engine="openpyxl")
+        except Exception as e:
+            raise ValueError(f"Error reading Excel file: {str(e)}. Please ensure the file is a valid Excel file.")
         sheet_names = excel_file.sheet_names
         all_sheets_data = {}
         parsed_json_data = {}  # Store parsed JSON for backend
-        
+
         # Create tabs for each sheet (only if sheet has data)
         sheet_tabs = []
         sheets_with_data = []  # Track sheets that have data
-        
+
         for sheet in sheet_names:
             df_sheet = excel_file.parse(sheet, dtype=str)
             df_sheet = df_sheet.fillna("")
-            
+
             # Skip empty sheets (no rows or empty DataFrame)
             if df_sheet.empty or len(df_sheet) == 0:
                 continue
-            
+
             # Store as list-of-dicts (JSON serializable) for display
             sheet_records = df_sheet.to_dict("records")
             all_sheets_data[sheet] = sheet_records
-            
+
             # Convert to JSON format for backend using build_json_data rules
             # Use ORIGINAL headers for JSON building (not processed headers)
             # Processed headers are only for display purposes
             original_headers = [str(col) for col in df_sheet.columns]
-            
+
             # Process headers according to duplicate rules (for display only)
             processed_headers = process_headers(original_headers)
-            
+
             # Prepare rows data
             rows = []
             for _, row in df_sheet.iterrows():
                 row_list = [row[col] for col in df_sheet.columns]
                 rows.append(row_list)
-            
+
             # Apply build_json_data rules with processed headers (as per original rules)
             # Processed headers handle duplicates correctly (renaming them)
             parsed_json_records = build_json_data(processed_headers, rows)
@@ -756,7 +692,7 @@ def store_file_data(contents, filename):
         if len(sheets_with_data) == 0:
             # No sheets with data
             output_data_upload_children = html.Div([
-                html.P("No data found in any sheet. Please upload a file with data.", 
+                html.P("No data found in any sheet. Please upload a file with data.",
                        style={'color': 'orange', 'fontWeight': 'bold', 'margin': '20px 0'})
             ], style={'margin': '20px 0'})
         elif len(sheets_with_data) > 1:
@@ -777,13 +713,13 @@ def store_file_data(contents, filename):
                     sheet_tabs[0].children[0] if sheet_tabs else html.Div()
                 ], style={'margin': '20px 0'})
                 ,
-                html.P("Click 'Validate' to send data to backend for validation.", 
+                html.P("Click 'Validate' to send data to backend for validation.",
                        style={'marginTop': '20px', 'fontStyle': 'italic', 'color': '#666'})
             ], style={'margin': '20px 0'})
 
-        return (contents, filename, filename, file_selected_display, 
-                {'display': 'block', 'margin': '20px 0'}, 
-                output_data_upload_children, 
+        return (contents, filename, filename, file_selected_display,
+                {'display': 'block', 'margin': '20px 0'},
+                output_data_upload_children,
                 all_sheets_data, sheet_names, parsed_json_data, active_sheet)
 
     except Exception as e:
@@ -797,9 +733,9 @@ def store_file_data(contents, filename):
 
 # Callback to show and enable validate button when a file is uploaded
 @app.callback(
-    [Output('validate-button', 'disabled'),
-     Output('validate-button-container', 'style'),
-     Output('reset-button-container', 'style')],
+    [Output('validate-button-samples', 'disabled'),
+     Output('validate-button-container-samples', 'style'),
+     Output('reset-button-container-samples', 'style')],
     [Input('stored-file-data', 'data')]
 )
 def show_and_enable_buttons(file_data):
@@ -811,12 +747,12 @@ def show_and_enable_buttons(file_data):
 
 # Callback to validate data when button is clicked
 @app.callback(
-    [Output('output-data-upload', 'children', allow_duplicate=True),
+    [Output('output-data-upload-samples', 'children', allow_duplicate=True),
      Output('stored-json-validation-results', 'data')],
-    [Input('validate-button', 'n_clicks')],
+    [Input('validate-button-samples', 'n_clicks')],
     [State('stored-file-data', 'data'),
      State('stored-filename', 'data'),
-     State('output-data-upload', 'children'),
+     State('output-data-upload-samples', 'children'),
      State('stored-all-sheets-data', 'data'),
      State('stored-sheet-names', 'data'),
      State('stored-parsed-json', 'data')],
@@ -930,9 +866,9 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
                                 updated_children.append(updated_c)
                                 continue
                             elif (
-                                  isinstance(c_props.get('children'), str) and
-                                  (c_props.get('children').startswith("File:") or
-                                   c_props.get('children') == "Click 'Validate' to process the file and see results.")
+                                    isinstance(c_props.get('children'), str) and
+                                    (c_props.get('children').startswith("File:") or
+                                     c_props.get('children') == "Click 'Validate' to process the file and see results.")
                             ):
                                 updated_children.append(c)
                                 continue
@@ -978,14 +914,14 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
 def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet_names):
     if not n_clicks:
         raise PreventUpdate
-    
+
     if not all_sheets_data or not sheet_names:
         raise PreventUpdate
 
     # Build a mapping of sample names to their field-level errors/warnings
     # Structure: {sample_name_normalized: {"errors": {field: [msgs]}, "warnings": {field: [msgs]}}}
     sample_to_field_errors = {}
-    
+
     # Helper function to map backend field names to Excel column names
     def _map_field_to_column_excel(field_name, columns):
         if not field_name:
@@ -1004,14 +940,14 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                 if '.' in col_str:
                     return col_str.split('.')[0]
                 return col_str
-            
+
             # Find all Health Status columns in order
             health_status_cols = []
             for i, col in enumerate(columns):
                 col_str = str(col)
                 if "Health Status" in col_str and "Term Source ID" not in col_str:
                     health_status_cols.append((i, col))
-            
+
             # For each Health Status column, find the Term Source ID column immediately after it
             term_cols_after_health_status = []
             for hs_idx, hs_col in health_status_cols:
@@ -1021,7 +957,7 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                     cleaned_next = _clean_col_name(next_col)
                     if cleaned_next == "Term Source ID":
                         term_cols_after_health_status.append(next_col)
-            
+
             if term_cols_after_health_status:
                 if 0 <= idx < len(term_cols_after_health_status):
                     return term_cols_after_health_status[idx]
@@ -1055,7 +991,7 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                 return base_match
 
         return None
-    
+
     if validation_results and 'results' in validation_results:
         validation_data = validation_results['results']
         results_by_type = validation_data.get('results_by_type', {}) or {}
@@ -1076,9 +1012,9 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                 sample_name = row.get("Sample Name", "")
                 if not sample_name:
                     continue
-                
+
                 sample_name_normalized = str(sample_name).strip().lower()
-                
+
                 row_err = row.get("errors") or {}
                 row_warn = row.get("warnings") or {}
 
@@ -1090,16 +1026,15 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                     if row_warn:
                         sample_to_field_errors[sample_name_normalized]["warnings"] = row_warn
 
-
             # Process valid rows with warnings
             valid_rows_full = _flatten_data_rows(st_data.get(valid_key)) or []
             for row in valid_rows_full:
                 sample_name = row.get("Sample Name", "")
                 if not sample_name:
                     continue
-                
+
                 sample_name_normalized = str(sample_name).strip().lower()
-                
+
                 warnings = row.get("warnings", [])
                 if warnings:
                     if sample_name_normalized not in sample_to_field_errors:
@@ -1112,20 +1047,20 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
         for sheet_name in sheet_names:
             if sheet_name not in all_sheets_data:
                 continue
-            
+
             # Get original sheet data
             sheet_records = all_sheets_data[sheet_name]
             if not sheet_records:
                 continue
-            
+
             # Convert to DataFrame
             df = pd.DataFrame(sheet_records)
-            
+
             # Build Error column and map field errors/warnings to columns
             error_column = []
             row_to_field_errors = {}  # {row_index: {"errors": {col_idx: msgs}, "warnings": {col_idx: msgs}}}
             cols_original = list(df.columns)  # Original columns before adding Error column
-            
+
             for row_idx, record in enumerate(sheet_records):
                 # Try to find sample name in various possible column names
                 sample_name = None
@@ -1133,18 +1068,18 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                     if key in record:
                         sample_name = str(record.get(key, ""))
                         break
-                
+
                 if not sample_name:
                     sample_name = str(list(record.values())[0]) if record else ""
-                
+
                 # Normalize sample name for matching
                 sample_name_normalized = sample_name.strip().lower() if sample_name else ""
-                
+
                 # Get field-level errors/warnings for this sample
                 field_data = sample_to_field_errors.get(sample_name_normalized, {})
                 field_errors = field_data.get("errors", {})
                 field_warnings = field_data.get("warnings", {})
-                
+
                 # Aggregate error messages for Error column
                 all_error_messages = []
                 for field, msgs in field_errors.items():
@@ -1155,13 +1090,13 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                     msgs_list = msgs if isinstance(msgs, list) else [msgs]
                     for msg in msgs_list:
                         all_error_messages.append(f"Warning: {field}: {msg}")
-                
+
                 error_column.append(" | ".join(all_error_messages) if all_error_messages else "")
-                
+
                 # Map field errors/warnings to column indices for highlighting
                 if field_errors or field_warnings:
                     row_to_field_errors[row_idx] = {"errors": {}, "warnings": {}}
-                    
+
                     # Map error fields to columns (use original columns before adding Error column)
                     for field, msgs in field_errors.items():
                         col = _map_field_to_column_excel(field, cols_original)
@@ -1172,7 +1107,7 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                                 "field": field,
                                 "messages": msgs
                             }
-                    
+
                     # Map warning fields to columns
                     for field, msgs in field_warnings.items():
                         col = _map_field_to_column_excel(field, cols_original)
@@ -1183,23 +1118,23 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                                 "field": field,
                                 "messages": msgs
                             }
-            
+
             # Add Error column to DataFrame
             df["Error"] = error_column
-            
+
             # Write to Excel
             sheet_name_clean = sheet_name[:31]  # Excel sheet name limit
             df.to_excel(writer, sheet_name=sheet_name_clean, index=False)
-            
+
             # Get Excel formatting objects
             book = writer.book
             fmt_red = book.add_format({"bg_color": "#FFCCCC"})
             fmt_yellow = book.add_format({"bg_color": "#FFF4CC"})
-            
+
             ws = writer.sheets[sheet_name_clean]
             cols = list(df.columns)  # Now includes Error column
             error_col_idx = cols.index("Error")
-            
+
             # Helper function to format messages for tooltip
             def format_tooltip_message(field_name, msgs, is_warning=False):
                 """Format error/warning messages for Excel comment/tooltip."""
@@ -1213,38 +1148,40 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                 if len(formatted) > max_length:
                     formatted = formatted[:max_length] + "..."
                 return formatted
-            
+
             # Highlight specific cells with errors/warnings and add tooltips
             for row_idx, record in enumerate(sheet_records):
                 excel_row = row_idx + 1  # Excel is 1-indexed
-                
+
                 if row_idx in row_to_field_errors:
                     field_data = row_to_field_errors[row_idx]
-                    
+
                     # Highlight error cells (red) - use original column indices
                     for col_idx, error_data in field_data.get("errors", {}).items():
                         if col_idx < len(cols):
                             cell_value = df.iat[row_idx, col_idx] if row_idx < len(df) else ""
                             ws.write(excel_row, col_idx, cell_value, fmt_red)
                             # Add tooltip/comment with error message
-                            field_name = error_data.get("field", cols_original[col_idx] if col_idx < len(cols_original) else "")
+                            field_name = error_data.get("field",
+                                                        cols_original[col_idx] if col_idx < len(cols_original) else "")
                             msgs = error_data.get("messages", [])
                             tooltip_text = format_tooltip_message(field_name, msgs, is_warning=False)
-                            ws.write_comment(excel_row, col_idx, tooltip_text, 
-                                            {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
-                    
+                            ws.write_comment(excel_row, col_idx, tooltip_text,
+                                             {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
+
                     # Highlight warning cells (yellow) - use original column indices
                     for col_idx, warning_data in field_data.get("warnings", {}).items():
                         if col_idx < len(cols):
                             cell_value = df.iat[row_idx, col_idx] if row_idx < len(df) else ""
                             ws.write(excel_row, col_idx, cell_value, fmt_yellow)
                             # Add tooltip/comment with warning message
-                            field_name = warning_data.get("field", cols_original[col_idx] if col_idx < len(cols_original) else "")
+                            field_name = warning_data.get("field", cols_original[col_idx] if col_idx < len(
+                                cols_original) else "")
                             msgs = warning_data.get("messages", [])
                             tooltip_text = format_tooltip_message(field_name, msgs, is_warning=True)
                             ws.write_comment(excel_row, col_idx, tooltip_text,
-                                            {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
-                
+                                             {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
+
                 # Format Error column cell and add tooltip
                 error_text = error_column[row_idx] if row_idx < len(error_column) else ""
                 if error_text:
@@ -1259,19 +1196,21 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                         field_data = row_to_field_errors[row_idx]
                         # Add error messages
                         for col_idx, error_data in field_data.get("errors", {}).items():
-                            field_name = error_data.get("field", cols_original[col_idx] if col_idx < len(cols_original) else "")
+                            field_name = error_data.get("field",
+                                                        cols_original[col_idx] if col_idx < len(cols_original) else "")
                             msgs = error_data.get("messages", [])
                             msgs_list = msgs if isinstance(msgs, list) else [msgs]
                             for msg in msgs_list:
                                 tooltip_parts.append(f"Error - {field_name}: {msg}")
                         # Add warning messages
                         for col_idx, warning_data in field_data.get("warnings", {}).items():
-                            field_name = warning_data.get("field", cols_original[col_idx] if col_idx < len(cols_original) else "")
+                            field_name = warning_data.get("field", cols_original[col_idx] if col_idx < len(
+                                cols_original) else "")
                             msgs = warning_data.get("messages", [])
                             msgs_list = msgs if isinstance(msgs, list) else [msgs]
                             for msg in msgs_list:
                                 tooltip_parts.append(f"Warning - {field_name}: {msg}")
-                    
+
                     if tooltip_parts:
                         tooltip_text = "\n".join([f"• {part}" for part in tooltip_parts])
                         # Truncate if too long
@@ -1279,7 +1218,7 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                         if len(tooltip_text) > max_length:
                             tooltip_text = tooltip_text[:max_length] + "..."
                         ws.write_comment(excel_row, error_col_idx, tooltip_text,
-                                        {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
+                                         {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
                 else:
                     ws.write(excel_row, error_col_idx, "")
 
@@ -1296,67 +1235,90 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
 def populate_validation_results_tabs(validation_results, sheet_names, all_sheets_data):
     if not validation_results or 'results' not in validation_results:
         return []
-    
+
     if not sheet_names:
         return []
 
     validation_data = validation_results['results']
+
+    # Get sample_types_processed to filter sheets
+    sample_types_processed = validation_data.get('sample_types_processed', []) or []
     
-    # Calculate sheet statistics
-    sheet_stats = _calculate_sheet_statistics(validation_results, all_sheets_data or {})
-    
+    # Get results_by_type for summary data
+    results_by_type = validation_data.get('results_by_type', {}) or {}
+
     sheet_tabs = []
     sheets_with_data = []
-    
+
     for sheet_name in sheet_names:
-        # Get statistics for this sheet
-        stats = sheet_stats.get(sheet_name, {})
-        errors = stats.get('error_records', 0)
-        warnings = stats.get('warning_records', 0)
+        # Only show sheets that are in sample_types_processed
+        if sheet_name not in sample_types_processed:
+            continue
         
-        if errors > 0 or warnings > 0:
-            sheets_with_data.append(sheet_name)
-            valid = stats.get('valid_records', 0)
-            # Create label showing counts for THIS sheet
-            label = f"{sheet_name} ({valid} valid / {errors} invalid)"
-            
-            sheet_tabs.append(
-                dcc.Tab(
-                    label=label,
-                    value=sheet_name,
-                    id={'type': 'sheet-validation-tab', 'sheet_name': sheet_name},
-                    style={
-                        'border': 'none',
-                        'padding': '12px 24px',
-                        'marginRight': '4px',
-                        'backgroundColor': '#f5f5f5',
-                        'color': '#666',
-                        'borderRadius': '8px 8px 0 0',
-                        'fontWeight': '500',
-                        'transition': 'all 0.3s ease',
-                        'cursor': 'pointer'
-                    },
-                    selected_style={
-                        'border': 'none',
-                        'borderBottom': '3px solid #4CAF50',
-                        'backgroundColor': '#ffffff',
-                        'color': '#4CAF50',
-                        'padding': '12px 24px',
-                        'marginRight': '4px',
-                        'borderRadius': '8px 8px 0 0',
-                        'fontWeight': 'bold',
-                        'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
-                    },
-                    children=[html.Div(id={'type': 'sheet-validation-content', 'index': sheet_name})]
-                )
+        # Get summary from results_by_type for this sample type (sheet_name)
+        st_data = results_by_type.get(sheet_name, {}) or {}
+        st_key = sheet_name.replace(' ', '_')
+        
+        # Get valid and invalid keys
+        invalid_key = f"invalid_{st_key}s"
+        if invalid_key.endswith('ss'):
+            invalid_key = invalid_key[:-1]
+        valid_key = f"valid_{st_key}s"
+        
+        # Get counts from results_by_type summary
+        valid_records = st_data.get(valid_key, [])
+        invalid_records = st_data.get(invalid_key, [])
+        
+        valid_count = len(valid_records) if isinstance(valid_records, list) else 0
+        invalid_count = len(invalid_records) if isinstance(invalid_records, list) else 0
+
+        # Make sheet name title case (first letter of each word capital)
+        sheet_name_title = sheet_name.title()
+        
+        # Create label using results_by_type summary with inline green color for valid count
+        label = f"{sheet_name_title} (<span style='color: #4CAF50; font-weight: bold;'>{valid_count} valid </span>/ {invalid_count} invalid)"
+
+        sheets_with_data.append(sheet_name)
+        sheet_tabs.append(
+            dcc.Tab(
+                label=label,
+                value=sheet_name,
+                id={'type': 'sheet-validation-tab', 'sheet_name': sheet_name},
+                style={
+                    'border': 'none',
+                    'padding': '12px 24px',
+                    'marginRight': '4px',
+                    'backgroundColor': '#f5f5f5',
+                    'color': '#666',
+                    'borderRadius': '8px 8px 0 0',
+                    'fontWeight': '500',
+                    'transition': 'all 0.3s ease',
+                    'cursor': 'pointer'
+                },
+                selected_style={
+                    'border': 'none',
+                    'borderBottom': '3px solid #4CAF50',
+                    'backgroundColor': '#ffffff',
+                    'color': '#666',
+                    'padding': '12px 24px',
+                    'marginRight': '4px',
+                    'borderRadius': '8px 8px 0 0',
+                    'fontWeight': 'bold',
+                    'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
+                },
+                children=[]  # Content will be shown in wrapper below tabs
             )
+        )
 
     if not sheet_tabs:
         return html.Div([
-            html.P("The provided data has been validated successfully with no errors or warnings. You may proceed with submission.", style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
+            html.P(
+                "The provided data has been validated successfully with no errors or warnings. You may proceed with submission.",
+                style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
         ])
 
-    tabs = dcc.Tabs(
+    tabs = html.Div([
+        dcc.Tabs(
         id='sheet-validation-tabs',
         value=sheets_with_data[0] if sheets_with_data else None,
         children=sheet_tabs,
@@ -1370,128 +1332,144 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
             "primary": "#4CAF50",
             "background": "#f5f5f5"
         }
-    )
-    
-    # Add a script component to style the tab labels with colors
-    # This will be executed after the tabs are rendered
-    style_script = html.Script(r"""
-        (function() {
-            function styleTabLabels() {
-                // Find the tab container
-                const tabContainer = document.getElementById('sheet-validation-tabs');
-                if (!tabContainer) {
-                    console.log('Tab container not found');
-                    return;
-                }
-                
-                // Dash tabs are typically rendered with role="tablist" and children with role="tab"
-                // Try multiple selectors to find tab elements
-                let tabLabels = tabContainer.querySelectorAll('[role="tab"]');
-                
-                // If not found, try other common patterns
-                if (tabLabels.length === 0) {
-                    tabLabels = tabContainer.querySelectorAll('.tab, [class*="tab"], [class*="Tab"]');
-                }
-                
-                // Also try finding by data attributes or IDs
-                if (tabLabels.length === 0) {
-                    tabLabels = tabContainer.querySelectorAll('div, button, a');
-                }
-                
-                console.log('Found', tabLabels.length, 'potential tab elements');
-                
-                tabLabels.forEach((tab, index) => {
-                    // Try to find the actual text node or label element
-                    let textElement = tab;
-                    let originalText = tab.textContent || tab.innerText || '';
-                    
-                    // If the tab has children, try to find the label element
-                    if (tab.children.length > 0) {
-                        for (let child of tab.children) {
-                            const childText = child.textContent || child.innerText || '';
-                            if (childText && (childText.includes('valid') || childText.includes('invalid'))) {
-                                textElement = child;
-                                originalText = childText;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    if (originalText && (originalText.includes('valid') || originalText.includes('invalid'))) {
-                        // Check if already styled to avoid re-processing
-                        if (textElement.querySelector && textElement.querySelector('span[style*="color"]')) {
-                            return;
-                        }
-                        
-                        // Create styled version with spans
-                        const styled = originalText.replace(
-                            /(\d+)\s+valid/g, 
-                            '<span style="color: #4CAF50 !important; font-weight: bold !important;">$1 valid</span>'
-                        ).replace(
-                            /(\d+)\s+invalid/g, 
-                            '<span style="color: #f44336 !important; font-weight: bold !important;">$1 invalid</span>'
-                        );
-                        
-                        if (styled !== originalText && styled.includes('<span')) {
-                            try {
-                                textElement.innerHTML = styled;
-                                console.log('Styled tab', index, ':', originalText.substring(0, 50));
-                            } catch (e) {
-                                console.error('Error styling tab', index, ':', e);
-                            }
-                        }
-                    }
-                });
-            }
-            
-            // Multiple attempts to ensure tabs are styled
-            function attemptStyle() {
-                styleTabLabels();
-            }
-            
-            // Run immediately
-            attemptStyle();
-            
-            // Run after short delays
-            setTimeout(attemptStyle, 100);
-            setTimeout(attemptStyle, 300);
-            setTimeout(attemptStyle, 500);
-            setTimeout(attemptStyle, 1000);
-            
-            // Use MutationObserver to watch for changes
-            const observer = new MutationObserver(function(mutations) {
-                setTimeout(attemptStyle, 50);
-            });
-            
-            const container = document.getElementById('sheet-validation-tabs');
-            if (container) {
-                observer.observe(container, { 
-                    childList: true, 
-                    subtree: true,
-                    characterData: true,
-                    attributes: true
-                });
-            }
-            
-            // Also run on various events
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', attemptStyle);
-            }
-            
-            window.addEventListener('load', function() {
-                setTimeout(attemptStyle, 200);
-            });
-            
-            // Watch for Dash renderer updates
-            if (window.dash_clientside) {
-                window.dash_clientside.no_update = function() {
-                    setTimeout(attemptStyle, 100);
-                };
-            }
-        })();
-    """
-    )
+        ),
+        html.Div(id='sheet-validation-content-wrapper', style={'marginTop': '20px'})
+    ])
 
+    # Add script to color the counts in tab labels
+    # This will be executed after the tabs are rendered
+    style_script = html.Script("""
+           (function() {
+               function styleTabLabels() {
+                   // Find the tab container - FIXED: use correct ID
+                   const tabContainer = document.getElementById('sheet-validation-tabs');
+                   if (!tabContainer) {
+                       console.log('[Tab Styling] Tab container not found: sheet-validation-tabs');
+                       return;
+                   }
+
+                   // Dash tabs are typically rendered with role="tablist" and children with role="tab"
+                   let tabLabels = tabContainer.querySelectorAll('[role="tab"]');
+                   
+                   if (tabLabels.length === 0) {
+                       // Try alternative selectors
+                       tabLabels = tabContainer.querySelectorAll('.tab, [class*="tab"], [class*="Tab"]');
+                   }
+                   
+                   if (tabLabels.length === 0) {
+                       tabLabels = tabContainer.querySelectorAll('div[role="tab"], button[role="tab"]');
+                   }
+
+                   console.log('[Tab Styling] Found', tabLabels.length, 'tab elements');
+
+                   tabLabels.forEach((tab, index) => {
+                       // Get the text content
+                       let textElement = tab;
+                       let originalText = tab.textContent || tab.innerText || '';
+
+                       // If the tab has children, check them for text
+                       if (tab.children && tab.children.length > 0) {
+                           for (let child of Array.from(tab.children)) {
+                               const childText = child.textContent || child.innerText || '';
+                               if (childText && (childText.includes('valid') || childText.includes('invalid'))) {
+                                   textElement = child;
+                                   originalText = childText;
+                                   break;
+                               }
+                           }
+                       }
+
+                       if (originalText && (originalText.includes('valid') || originalText.includes('invalid'))) {
+                           // Check if already styled to avoid re-processing
+                           if (textElement.querySelector && textElement.querySelector('span[style*="color"]')) {
+                               return;
+                           }
+
+                           // Match pattern: (number valid / number invalid)
+                           // FIXED: Better regex pattern that matches the actual format
+                           const match = originalText.match(/\\((\\d+)\\s+valid\\s+\\/\\s+(\\d+)\\s+invalid\\)/);
+                           if (match) {
+                               const validCount = match[1];
+                               const invalidCount = match[2];
+                               
+                               // Replace with colored spans - color both number and word
+                               const styled = originalText.replace(
+                                   /\\((\\d+)\\s+valid\\s+\\/\\s+(\\d+)\\s+invalid\\)/,
+                                   '(<span style="color: #4CAF50 !important; font-weight: bold !important;">' + validCount + ' valid</span> / <span style="color: #f44336 !important; font-weight: bold !important;">' + invalidCount + ' invalid</span>)'
+                               );
+
+                               if (styled !== originalText) {
+                                   try {
+                                       textElement.innerHTML = styled;
+                                       console.log('[Tab Styling] Successfully styled tab', index, ':', originalText.substring(0, 50));
+                                   } catch (e) {
+                                       console.error('[Tab Styling] Error styling tab', index, ':', e);
+                                   }
+                               }
+                           } else {
+                               // Fallback: try individual replacements if pattern doesn't match
+                               // Color both number and word
+                               const styled = originalText.replace(
+                                   /(\\d+)\\s+valid/g, 
+                                   '<span style="color: #4CAF50 !important; font-weight: bold !important;">$1 valid</span>'
+                               ).replace(
+                                   /(\\d+)\\s+invalid/g, 
+                                   '<span style="color: #f44336 !important; font-weight: bold !important;">$1 invalid</span>'
+                               );
+
+                               if (styled !== originalText && styled.includes('<span')) {
+                                   try {
+                                       textElement.innerHTML = styled;
+                                       console.log('[Tab Styling] Successfully styled tab (fallback)', index);
+                                   } catch (e) {
+                                       console.error('[Tab Styling] Error styling tab (fallback)', index, ':', e);
+                                   }
+                               }
+                           }
+                       }
+                   });
+               }
+
+               // Multiple attempts to ensure tabs are styled
+               function attemptStyle() {
+                   styleTabLabels();
+               }
+
+               // Run immediately
+               attemptStyle();
+
+               // Run after short delays to catch tabs that render later
+               setTimeout(attemptStyle, 100);
+               setTimeout(attemptStyle, 300);
+               setTimeout(attemptStyle, 500);
+               setTimeout(attemptStyle, 1000);
+               setTimeout(attemptStyle, 2000);
+
+               // Use MutationObserver to watch for changes
+               const container = document.getElementById('sheet-validation-tabs');
+               if (container) {
+                   const observer = new MutationObserver(function(mutations) {
+                       setTimeout(attemptStyle, 50);
+                   });
+                   
+                   observer.observe(container, { 
+                       childList: true, 
+                       subtree: true,
+                       characterData: true,
+                       attributes: true
+                   });
+               }
+
+               // Also run on various events
+               if (document.readyState === 'loading') {
+                   document.addEventListener('DOMContentLoaded', attemptStyle);
+               }
+
+               window.addEventListener('load', function() {
+                   setTimeout(attemptStyle, 200);
+               });
+           })();
+       """)
     header_bar = html.Div(
         [
             html.Div(),
@@ -1518,49 +1496,66 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
         }
     )
 
-    return html.Div([header_bar, tabs, style_script], style={"marginTop": "8px"})
+    return html.Div([
+        header_bar, 
+        tabs, 
+        style_script
+    ], style={
+        "marginTop": "8px",
+        "transition": "opacity 0.3s ease-in-out"
+    })
 
 
 # Callback to populate sheet content when tab is selected
 @app.callback(
-    Output({'type': 'sheet-validation-content', 'index': MATCH}, 'children'),
+    Output('sheet-validation-content-wrapper', 'children'),
     [Input('sheet-validation-tabs', 'value')],
     [State('stored-json-validation-results', 'data'),
-     State('stored-all-sheets-data', 'data')]
+     State('stored-all-sheets-data', 'data')],
+    prevent_initial_call=False
 )
 def populate_sheet_validation_content(selected_sheet_name, validation_results, all_sheets_data):
     if validation_results is None or selected_sheet_name is None:
-        return []
+        return html.Div(style={'opacity': 0, 'transition': 'opacity 0.3s ease-in-out'})
 
     if not all_sheets_data or selected_sheet_name not in all_sheets_data:
-        return html.Div("No data available for this sheet.")
-    
-    return make_sheet_validation_panel(selected_sheet_name, validation_results, all_sheets_data)
+        return html.Div("No data available for this sheet.", style={'opacity': 1, 'transition': 'opacity 0.3s ease-in-out'})
+
+    # Wrap content with smooth transition
+    content = make_sheet_validation_panel(selected_sheet_name, validation_results, all_sheets_data)
+    return html.Div(
+        content,
+        style={
+            'opacity': 1,
+            'transition': 'opacity 0.3s ease-in-out',
+            'animation': 'fadeIn 0.3s ease-in-out'
+        }
+    )
 
 
 def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_sheets_data: dict):
     """Create a panel showing validation results for a specific Excel sheet with report at the end."""
     import uuid
     panel_id = str(uuid.uuid4())
-    
+
     # Get sheet data
     sheet_records = all_sheets_data.get(sheet_name, [])
     if not sheet_records:
         return html.Div([html.H4("No data available", style={'textAlign': 'center', 'margin': '10px 0'})])
-    
+
     # Get validation data
     validation_data = validation_results.get('results', {})
     results_by_type = validation_data.get('results_by_type', {}) or {}
     total_summary = validation_data.get('total_summary', {})
     sample_types = validation_data.get('sample_types_processed', []) or []
-    
+
     # Get all validation rows for this sheet
     sheet_sample_names = {str(record.get("Sample Name", "")) for record in sheet_records}
-    
+
     # Collect all rows that belong to this sheet
     error_map = {}
     warning_map = {}
-    
+
     for sample_type in sample_types:
         st_data = results_by_type.get(sample_type, {}) or {}
         st_key = sample_type.replace(' ', '_')
@@ -1568,7 +1563,7 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
         if invalid_key.endswith('ss'):
             invalid_key = invalid_key[:-1]
         valid_key = f"valid_{st_key}s"
-        
+
         invalid_records = st_data.get(invalid_key, [])
         valid_records = st_data.get(valid_key, [])
 
@@ -1585,13 +1580,13 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
     df_all = pd.DataFrame(sheet_records)
     if df_all.empty:
         return html.Div([html.H4("No data available", style={'textAlign': 'center', 'margin': '10px 0'})])
-    
+
     # Use the same styling logic as make_sample_type_panel
     def _as_list(msgs):
         if isinstance(msgs, list):
             return [str(m) for m in msgs]
         return [str(msgs)]
-    
+
     def _map_field_to_column(field_name, columns):
         # Same mapping logic as in make_sample_type_panel
         if not field_name:
@@ -1602,11 +1597,13 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
                 idx = int(parts[1])
             except Exception:
                 idx = 0
+
             def _clean_col_name(col):
                 col_str = str(col)
                 if '.' in col_str:
                     return col_str.split('.')[0]
                 return col_str
+
             health_status_cols = []
             for i, col in enumerate(columns):
                 col_str = str(col)
@@ -1646,24 +1643,23 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
             if base_match:
                 return base_match
         return None
-    
+
     # Build cell styles and tooltips
     cell_styles = []
     tooltip_data = []
-    
-    
+
     for i, row in df_all.iterrows():
         sample_name = str(row.get("Sample Name", ""))
         tips = {}
         row_styles = []
-        
+
         if sample_name in error_map:
             field_errors = error_map[sample_name] or {}
             for field, msgs in field_errors.items():
                 col = _map_field_to_column(field, df_all.columns)
                 if not col:
-                    col = field # Use field name if no column found
-                
+                    col = field  # Use field name if no column found
+
                 col_id = None
                 if col in df_all.columns:
                     col_id = col
@@ -1693,14 +1689,13 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
                 else:
                     row_styles.append({'if': {'row_index': i, 'column_id': col_id}, 'backgroundColor': '#ffcccc'})
                     tips[col_id] = {'value': combined, 'type': 'markdown'}
-                    
-        
+
         if sample_name in warning_map:
             field_warnings = warning_map[sample_name] or {}
             for field, msgs in field_warnings.items():
                 col = _map_field_to_column(field, df_all.columns)
                 if not col:
-                    col = field # Use field name if no column found
+                    col = field  # Use field name if no column found
 
                 col_id = None
                 if col in df_all.columns:
@@ -1722,63 +1717,60 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
                     combined = warn_text
                 tips[col_id] = {'value': combined, 'type': 'markdown'}
                 row_styles.append({'if': {'row_index': i, 'column_id': col_id}, 'backgroundColor': '#fff4cc'})
-        
+
         cell_styles.extend(row_styles)
         tooltip_data.append(tips)
-    
-    
-    
+
     def clean_header_name(header):
         if '.' in header:
             return header.split('.')[0]
         return header
-    
+
     columns = [{"name": clean_header_name(c), "id": c} for c in df_all.columns]
-    
+
     # Calculate statistics for this sheet
     total_records = len(sheet_records)
     error_records = len([s for s in sheet_sample_names if s in error_map])
     warning_records = len([s for s in sheet_sample_names if s in warning_map and s not in error_map])
     valid_records = total_records - error_records
-    
+
     # Count errors and warnings by field
     error_fields_count = {}
     for sample_name, field_errors in error_map.items():
         for field in field_errors.keys():
             error_fields_count[field] = error_fields_count.get(field, 0) + 1
-    
+
     warning_fields_count = {}
     for sample_name, field_warnings in warning_map.items():
         for field in field_warnings.keys():
             warning_fields_count[field] = warning_fields_count.get(field, 0) + 1
-    
+
     # Build report sections
     report_sections = []
-    
-    
-    
+
     # Errors by field
-    if error_fields_count:
-        error_items = sorted(error_fields_count.items(), key=lambda x: x[1], reverse=True)
-        report_sections.append(
-            html.Div([
-                html.H5("Errors by Field", style={
-                    'marginTop': '20px',
-                    'marginBottom': '15px',
-                    'color': '#f44336',
-                    'borderBottom': '2px solid #f44336',
-                    'paddingBottom': '8px'
-                }),
-                html.Ul([
-                    html.Li([
-                        html.Span(f"{field}: ", style={'fontWeight': 'bold'}),
-                        html.Span(f"{count} error(s)", style={'color': '#666'})
-                    ], style={'marginBottom': '6px'})
-                    for field, count in error_items
-                ], style={'padding': '10px', 'backgroundColor': '#ffebee', 'borderRadius': '6px', 'listStylePosition': 'inside'})
-            ])
-        )
-    
+    # if error_fields_count:
+    #     error_items = sorted(error_fields_count.items(), key=lambda x: x[1], reverse=True)
+    #     report_sections.append(
+    #         html.Div([
+    #             html.H5("Errors by Field", style={
+    #                 'marginTop': '20px',
+    #                 'marginBottom': '15px',
+    #                 'color': '#f44336',
+    #                 'borderBottom': '2px solid #f44336',
+    #                 'paddingBottom': '8px'
+    #             }),
+    #             html.Ul([
+    #                 html.Li([
+    #                     html.Span(f"{field}: ", style={'fontWeight': 'bold'}),
+    #                     html.Span(f"{count} error(s)", style={'color': '#666'})
+    #                 ], style={'marginBottom': '6px'})
+    #                 for field, count in error_items
+    #             ], style={'padding': '10px', 'backgroundColor': '#ffebee', 'borderRadius': '6px',
+    #                       'listStylePosition': 'inside'})
+    #         ])
+    #     )
+
     # Warnings by field
     if warning_fields_count:
         warning_items = sorted(warning_fields_count.items(), key=lambda x: x[1], reverse=True)
@@ -1797,10 +1789,11 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
                         html.Span(f"{count} warning(s)", style={'color': '#666'})
                     ], style={'marginBottom': '6px'})
                     for field, count in warning_items
-                ], style={'padding': '10px', 'backgroundColor': '#fff3e0', 'borderRadius': '6px', 'listStylePosition': 'inside'})
+                ], style={'padding': '10px', 'backgroundColor': '#fff3e0', 'borderRadius': '6px',
+                          'listStylePosition': 'inside'})
             ])
         )
-    
+
     # Total Summary
     if total_summary:
         total_summary_items = []
@@ -1829,12 +1822,10 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
                     )
                 ])
             )
-    
+
     zebra = [{'if': {'row_index': 'odd'}, 'backgroundColor': 'rgb(248, 248, 248)'}]
-    
+
     blocks = [
-        html.H4(f"Validation Results - {sheet_name}", style={'textAlign': 'center', 'margin': '10px 0'})
-        ,
         html.Div([
             DataTable(
                 id={"type": "sheet-result-table", "sheet_name": sheet_name, "panel_id": panel_id},
@@ -1844,7 +1835,7 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
                 style_table={"overflowX": "auto"},
                 style_cell={"textAlign": "left", "padding": "6px"},
                 style_header={"fontWeight": "bold", "backgroundColor": "rgb(230, 230, 230)"},
-                                style_data_conditional=zebra + cell_styles,
+                style_data_conditional=zebra + cell_styles,
                 tooltip_data=tooltip_data,
                 tooltip_duration=None
             )
@@ -1864,10 +1855,8 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
             }
         )
     ]
-    
+
     return html.Div(blocks)
-
-
 
 
 @app.callback(
@@ -1948,14 +1937,14 @@ def create_sheet_tabs_ui(sheet_names, active_sheet, all_sheets_data=None):
 def _calculate_sheet_statistics(validation_results, all_sheets_data):
     """Calculate errors and warnings count for each Excel sheet."""
     sheet_stats = {}
-    
+
     if not validation_results or 'results' not in validation_results:
         return sheet_stats
-    
+
     validation_data = validation_results['results']
     results_by_type = validation_data.get('results_by_type', {}) or {}
     sample_types = validation_data.get('sample_types_processed', []) or []
-    
+
     # Initialize sheet stats
     if all_sheets_data:
         for sheet_name in all_sheets_data.keys():
@@ -1966,22 +1955,22 @@ def _calculate_sheet_statistics(validation_results, all_sheets_data):
                 'warning_records': 0,
                 'sample_status': {}  # {sample_name: 'error'|'warning'|'valid'}
             }
-    
+
     # Process each sample type and map to sheets
     for sample_type in sample_types:
         st_data = results_by_type.get(sample_type, {}) or {}
         st_key = sample_type.replace(' ', '_')
-        
+
         invalid_key = f"invalid_{st_key}s"
         if invalid_key.endswith('ss'):
             invalid_key = invalid_key[:-1]
         valid_key = f"valid_{st_key}s"
-        
+
         invalid_records = st_data.get(invalid_key, [])
         valid_records = st_data.get(valid_key, [])
-        
+
         all_records = invalid_records + valid_records
-        
+
         for record in all_records:
             sample_name = record.get("sample_name", "")
             if not sample_name:
@@ -2003,7 +1992,7 @@ def _calculate_sheet_statistics(validation_results, all_sheets_data):
                             'warning_records': 0,
                             'sample_status': {}
                         }
-                    
+
                     if sample_name not in sheet_stats[sheet_name]['sample_status']:
                         if errors:
                             sheet_stats[sheet_name]['error_records'] += 1
@@ -2015,7 +2004,7 @@ def _calculate_sheet_statistics(validation_results, all_sheets_data):
                             sheet_stats[sheet_name]['valid_records'] += 1
                             sheet_stats[sheet_name]['sample_status'][sample_name] = 'valid'
                     break
-    
+
     # Correct valid counts
     for sheet_name in sheet_stats:
         stats = sheet_stats[sheet_name]
@@ -2044,9 +2033,9 @@ def _mount_biosamples_form(v):
 
 @app.callback(
     [
-        Output("biosamples-form", "style"),
-        Output("biosamples-status-banner", "children"),
-        Output("biosamples-status-banner", "style"),
+        Output("biosamples-form-samples", "style"),
+        Output("biosamples-status-banner-samples", "children"),
+        Output("biosamples-status-banner-samples", "style"),
     ],
     Input("stored-json-validation-results", "data"),
 )
@@ -2094,32 +2083,50 @@ def _toggle_biosamples_form(v):
 
 
 @app.callback(
-    Output("biosamples-submit-btn", "disabled"),
+    [Output("biosamples-submit-btn-samples", "disabled"),
+     Output("biosamples-submit-btn-samples", "style")],
     [
-        Input("biosamples-username", "value"),
-        Input("biosamples-password", "value"),
+        Input("biosamples-username-samples", "value"),
+        Input("biosamples-password-samples", "value"),
         Input("stored-json-validation-results", "data"),
     ],
 )
 def _disable_submit(u, p, v):
+    # Default enabled style
+    enabled_style = {
+        "backgroundColor": "#673ab7", "color": "white", "padding": "10px 18px",
+        "border": "none", "borderRadius": "8px", "cursor": "pointer",
+        "fontSize": "16px", "width": "140px"
+    }
+    # Disabled style (grayed out)
+    disabled_style = {
+        "backgroundColor": "#cccccc", "color": "#666666", "padding": "10px 18px",
+        "border": "none", "borderRadius": "8px", "cursor": "not-allowed",
+        "fontSize": "16px", "width": "140px", "opacity": "0.6"
+    }
+    
     if not v or "results" not in v:
-        return True
-    valid_cnt, _ = _valid_invalid_counts(v)
-    if valid_cnt == 0:
-        return True
-    return not (u and p)
+        return True, disabled_style
+    valid_cnt, invalid = _valid_invalid_counts(v)
+    # Enable submit button only when total samples == valid samples (i.e., invalid == 0)
+    # This means all samples are valid
+    if invalid > 0:
+        return True, disabled_style  # Disable if there are invalid samples
+    # All samples are valid, enable if username and password are provided
+    is_enabled = u and p
+    return not is_enabled, enabled_style if is_enabled else disabled_style
 
 
 @app.callback(
     [
-        Output("biosamples-submit-msg", "children"),
-        Output("biosamples-results-table", "children"),
+        Output("biosamples-submit-msg-samples", "children"),
+        Output("biosamples-results-table-samples", "children"),
     ],
-    Input("biosamples-submit-btn", "n_clicks"),
-    State("biosamples-username", "value"),
-    State("biosamples-password", "value"),
-    State("biosamples-env", "value"),
-    State("biosamples-action", "value"),
+    Input("biosamples-submit-btn-samples", "n_clicks"),
+    State("biosamples-username-samples", "value"),
+    State("biosamples-password-samples", "value"),
+    State("biosamples-env-samples", "value"),
+    State("biosamples-action-samples", "value"),
     State("stored-json-validation-results", "data"),
     prevent_initial_call=True,
 )
@@ -2208,7 +2215,7 @@ def _submit_to_biosamples(n, username, password, env, action, v):
                 if acc:
                     row[
                         "BioSample ID"
-                    ] = f"[{acc}](https://www.ebi.ac.uk/biosamples/samples/{acc})"
+                    ] = f"[{acc}](https://wwwdev.ebi.ac.uk/biosamples/samples/{acc})"
 
             table = dash_table.DataTable(
                 data=table_data,
@@ -2241,12 +2248,12 @@ def _submit_to_biosamples(n, username, password, env, action, v):
 
 
 @app.callback(
-    Output("biosamples-form-mount", "children", allow_duplicate=True),
-    Input("upload-data", "contents"),
+    Output("biosamples-form-samples", "style", allow_duplicate=True),
+    Input("upload-data-samples", "contents"),
     prevent_initial_call=True,
 )
 def _clear_biosamples_form_on_new_upload(_):
-    return []
+    return {"display": "none", "marginTop": "16px"}
 
 
 app.clientside_callback(
@@ -2259,7 +2266,7 @@ app.clientside_callback(
     }
     """,
     Output("dummy-output-for-reset", "children"),
-    [Input("reset-button", "n_clicks")],
+    [Input("reset-button-samples", "n_clicks")],
     prevent_initial_call=True,
 )
 
@@ -2268,24 +2275,30 @@ app.clientside_callback(
     """
     function(validation_results) {
         if (!validation_results) {
-            return window.dash_clientside.no_update;
+            if (window.dash_clientside && window.dash_clientside.no_update) {
+                return window.dash_clientside.no_update;
+            }
+            return null;
         }
 
-        // Function to style tab labels
+        // Function to style tab labels - FIXED: use correct ID
         function styleTabLabels() {
-            const tabContainer = document.getElementById('sample-type-tabs');
+            const tabContainer = document.getElementById('sheet-validation-tabs');
             if (!tabContainer) {
+                console.log('[Clientside] Tab container not found: sheet-validation-tabs');
                 return;
             }
 
             // Try multiple selectors to find tab elements
             let tabLabels = tabContainer.querySelectorAll('[role="tab"]');
             if (tabLabels.length === 0) {
-                tabLabels = tabContainer.querySelectorAll('.tab, [class*="tab"], [class*="Tab"], div[class*="tab"]');
+                tabLabels = tabContainer.querySelectorAll('.tab, [class*="tab"], [class*="Tab"]');
             }
             if (tabLabels.length === 0) {
-                tabLabels = tabContainer.querySelectorAll('div, button, a, span');
+                tabLabels = tabContainer.querySelectorAll('div[role="tab"], button[role="tab"]');
             }
+
+            console.log('[Clientside] Found', tabLabels.length, 'tab elements');
 
             tabLabels.forEach((tab) => {
                 let textElement = tab;
@@ -2309,20 +2322,42 @@ app.clientside_callback(
                         return;
                     }
 
-                    // Create styled version
-                    const styled = originalText.replace(
-                        /(\\d+)\\s+valid/g, 
-                        '<span style="color: #4CAF50 !important; font-weight: bold !important;">$1 valid</span>'
-                    ).replace(
-                        /(\\d+)\\s+invalid/g, 
-                        '<span style="color: #f44336 !important; font-weight: bold !important;">$1 invalid</span>'
-                    );
+                    // Match pattern: (number valid / number invalid)
+                    const match = originalText.match(/\\((\\d+)\\s+valid\\s+\\/\\s+(\\d+)\\s+invalid\\)/);
+                    if (match) {
+                        const validCount = match[1];
+                        const invalidCount = match[2];
+                        
+                        const styled = originalText.replace(
+                            /\\((\\d+)\\s+valid\\s+\\/\\s+(\\d+)\\s+invalid\\)/,
+                            '(<span style="color: #4CAF50 !important; font-weight: bold !important;">' + validCount + ' valid</span> / <span style="color: #f44336 !important; font-weight: bold !important;">' + invalidCount + ' invalid</span>)'
+                        );
 
-                    if (styled !== originalText && styled.includes('<span')) {
-                        try {
-                            textElement.innerHTML = styled;
-                        } catch (e) {
-                            console.error('Error styling tab:', e);
+                        if (styled !== originalText) {
+                            try {
+                                textElement.innerHTML = styled;
+                                console.log('[Clientside] Successfully styled tab');
+                            } catch (e) {
+                                console.error('[Clientside] Error styling tab:', e);
+                            }
+                        }
+                    } else {
+                        // Fallback: individual replacements
+                        // Color both number and word
+                        const styled = originalText.replace(
+                            /(\\d+)\\s+valid/g, 
+                            '<span style="color: #4CAF50 !important; font-weight: bold !important;">$1 valid</span>'
+                        ).replace(
+                            /(\\d+)\\s+invalid/g, 
+                            '<span style="color: #f44336 !important; font-weight: bold !important;">$1 invalid</span>'
+                        );
+
+                        if (styled !== originalText && styled.includes('<span')) {
+                            try {
+                                textElement.innerHTML = styled;
+                            } catch (e) {
+                                console.error('[Clientside] Error styling tab:', e);
+                            }
                         }
                     }
                 }
@@ -2333,14 +2368,21 @@ app.clientside_callback(
         setTimeout(styleTabLabels, 100);
         setTimeout(styleTabLabels, 500);
         setTimeout(styleTabLabels, 1000);
+        setTimeout(styleTabLabels, 2000);
 
-        return window.dash_clientside.no_update;
+        // Return no_update safely
+        if (window.dash_clientside && window.dash_clientside.no_update) {
+            return window.dash_clientside.no_update;
+        }
+        return null;
     }
     """,
     Output('validation-results-container', 'children', allow_duplicate=True),
     [Input('stored-json-validation-results', 'data')],
     prevent_initial_call='initial_duplicate'
 )
+
+
 def reset_app_state(n_clicks):
     if n_clicks > 0:
         return (
@@ -2350,6 +2392,21 @@ def reset_app_state(n_clicks):
             True, {'display': 'none', 'marginLeft': '10px'}, {'display': 'none', 'marginLeft': '10px'}
         )
     return dash.no_update
+
+
+# ============================================================================
+# EXPERIMENTS TAB CALLBACKS - MOVED TO experiments_tab.py
+# ============================================================================
+# All experiments tab callbacks are now in experiments_tab.py
+# They are registered via register_experiments_callbacks() at the end of this file
+
+# Register experiments tab callbacks
+from experiments_tab import register_experiments_callbacks
+register_experiments_callbacks(app)
+
+# Register analysis tab callbacks
+from analysis_tab import register_analysis_callbacks
+register_analysis_callbacks(app)
 
 
 if __name__ == '__main__':
