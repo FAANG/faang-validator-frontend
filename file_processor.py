@@ -63,8 +63,8 @@ def build_json_data(headers: List[str], rows: List[List[str]], sheet_name: str =
     has_specimen_picture_url = any(h == "Specimen Picture URL" for h in headers)
     has_derived_from = any(h == "Derived From" for h in headers)
     # Experiment fields
-    has_chip_target = any(h.lower().startswith("Chip Target") for h in headers)
-    has_experiment_target = any(h.lower().startswith("Experiment Target") for h in headers)
+    has_chip_target = any(h.startswith("Chip Target") for h in headers)
+    has_experiment_target = any(h.startswith("Experiment Target") for h in headers)
     # Analysis fields
     has_experiment_type = any(h.startswith("Experiment Type") for h in headers)
     has_platform = any(h.startswith("Platform") for h in headers)
@@ -139,7 +139,7 @@ def build_json_data(headers: List[str], rows: List[List[str]], sheet_name: str =
                         })
                     i += 1
                 continue
-            if has_health_status and col.startswith("Cell Type"):
+            if has_cell_type and col.startswith("Cell Type"):
                 # Check next column for Term Source ID
                 if i + 1 < len(headers) and "Term Source ID" in headers[i + 1]:
                     term_val = row[i + 1] if i + 1 < len(row) else ""
@@ -180,11 +180,11 @@ def build_json_data(headers: List[str], rows: List[List[str]], sheet_name: str =
                 continue
 
             # Special handling for chip target (experiment field)
-            elif has_chip_target and col.startswith("chip target"):
+            elif has_chip_target and col.startswith("Chip Target"):
                 # Check next column for Term Source ID or Term
                 if i + 1 < len(headers) and ("Term Source ID" in headers[i + 1] or "Term" in headers[i + 1]):
                     term_val = row[i + 1] if i + 1 < len(row) else ""
-                    record["chip target"] = {
+                    record["Chip Target"] = {
                         "text": val,
                         "term": term_val
                     }
@@ -192,7 +192,7 @@ def build_json_data(headers: List[str], rows: List[List[str]], sheet_name: str =
                 else:
                     # If only text is provided, set term to empty
                     if val:
-                        record["chip target"] = {
+                        record["Chip Target"] = {
                             "text": val,
                             "term": ""
                         }
@@ -200,7 +200,7 @@ def build_json_data(headers: List[str], rows: List[List[str]], sheet_name: str =
                 continue
 
             # Special handling for experiment target (experiment field)
-            elif has_experiment_target and col.lower().startswith("experiment target"):
+            elif has_experiment_target and col.startswith("Experiment Target"):
                 # Check next column for Term Source ID or Term
                 if i + 1 < len(headers) and ("Term Source ID" in headers[i + 1] or "Term" in headers[i + 1]):
                     term_val = row[i + 1] if i + 1 < len(row) else ""

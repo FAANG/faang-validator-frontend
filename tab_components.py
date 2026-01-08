@@ -83,7 +83,7 @@ def create_file_upload_area(tab_type: str):
                 id=f'biosamples-action-{tab_type}',
                 options=[
                     {"label": " Submit new sample", "value": "submission"},
-                    {"label": " Update existing sample", "value": "update"},
+                    # {"label": " Update existing sample", "value": "update"},
                 ],
                 value="submission",
                 labelStyle={"marginRight": "24px"},

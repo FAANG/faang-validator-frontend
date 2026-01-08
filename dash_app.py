@@ -32,14 +32,22 @@ app.index_string = '''
         {%favicon%}
         {%css%}
         <style>
-            /* Style valid/invalid counts in tab labels */
-            .tab-label-valid {
-                color: #4CAF50;
-                font-weight: bold;
+            @keyframes fadeIn {
+                from { opacity: 0; }
+                to { opacity: 1; }
             }
-            .tab-label-invalid {
-                color: #f44336;
-                font-weight: bold;
+            #sheet-validation-content-wrapper {
+                transition: opacity 0.3s ease-in-out;
+            }
+            /* Style for valid count in tab labels */
+            .valid-count {
+                color: #4CAF50 !important;
+                font-weight: bold !important;
+            }
+            /* Style for invalid count in tab labels */
+            .invalid-count {
+                color: #f44336 !important;
+                font-weight: bold !important;
             }
         </style>
     </head>
@@ -1233,54 +1241,74 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
 
     validation_data = validation_results['results']
 
-    # Calculate sheet statistics
-    sheet_stats = _calculate_sheet_statistics(validation_results, all_sheets_data or {})
+    # Get sample_types_processed to filter sheets
+    sample_types_processed = validation_data.get('sample_types_processed', []) or []
+    
+    # Get results_by_type for summary data
+    results_by_type = validation_data.get('results_by_type', {}) or {}
 
     sheet_tabs = []
     sheets_with_data = []
 
     for sheet_name in sheet_names:
-        # Get statistics for this sheet
-        stats = sheet_stats.get(sheet_name, {})
-        errors = stats.get('error_records', 0)
-        warnings = stats.get('warning_records', 0)
+        # Only show sheets that are in sample_types_processed
+        if sheet_name not in sample_types_processed:
+            continue
+        
+        # Get summary from results_by_type for this sample type (sheet_name)
+        st_data = results_by_type.get(sheet_name, {}) or {}
+        st_key = sheet_name.replace(' ', '_')
+        
+        # Get valid and invalid keys
+        invalid_key = f"invalid_{st_key}s"
+        if invalid_key.endswith('ss'):
+            invalid_key = invalid_key[:-1]
+        valid_key = f"valid_{st_key}s"
+        
+        # Get counts from results_by_type summary
+        valid_records = st_data.get(valid_key, [])
+        invalid_records = st_data.get(invalid_key, [])
+        
+        valid_count = len(valid_records) if isinstance(valid_records, list) else 0
+        invalid_count = len(invalid_records) if isinstance(invalid_records, list) else 0
 
-        if errors > 0 or warnings > 0:
-            sheets_with_data.append(sheet_name)
-            valid = stats.get('valid_records', 0)
-            # Create label showing counts for THIS sheet
-            label = f"{sheet_name} ({valid} valid / {errors} invalid)"
+        # Make sheet name title case (first letter of each word capital)
+        sheet_name_title = sheet_name.title()
+        
+        # Create label using results_by_type summary
+        label = f"{sheet_name_title} ({valid_count} valid / {invalid_count} invalid)"
 
-            sheet_tabs.append(
-                dcc.Tab(
-                    label=label,
-                    value=sheet_name,
-                    id={'type': 'sheet-validation-tab', 'sheet_name': sheet_name},
-                    style={
-                        'border': 'none',
-                        'padding': '12px 24px',
-                        'marginRight': '4px',
-                        'backgroundColor': '#f5f5f5',
-                        'color': '#666',
-                        'borderRadius': '8px 8px 0 0',
-                        'fontWeight': '500',
-                        'transition': 'all 0.3s ease',
-                        'cursor': 'pointer'
-                    },
-                    selected_style={
-                        'border': 'none',
-                        'borderBottom': '3px solid #4CAF50',
-                        'backgroundColor': '#ffffff',
-                        'color': '#4CAF50',
-                        'padding': '12px 24px',
-                        'marginRight': '4px',
-                        'borderRadius': '8px 8px 0 0',
-                        'fontWeight': 'bold',
-                        'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
-                    },
-                    children=[html.Div(id={'type': 'sheet-validation-content', 'index': sheet_name})]
-                )
+        sheets_with_data.append(sheet_name)
+        sheet_tabs.append(
+            dcc.Tab(
+                label=label,
+                value=sheet_name,
+                id={'type': 'sheet-validation-tab', 'sheet_name': sheet_name},
+                style={
+                    'border': 'none',
+                    'padding': '12px 24px',
+                    'marginRight': '4px',
+                    'backgroundColor': '#f5f5f5',
+                    'color': '#666',
+                    'borderRadius': '8px 8px 0 0',
+                    'fontWeight': '500',
+                    'transition': 'all 0.3s ease',
+                    'cursor': 'pointer'
+                },
+                selected_style={
+                    'border': 'none',
+                    'borderBottom': '3px solid #4CAF50',
+                    'backgroundColor': '#ffffff',
+                    'color': '#666',
+                    'padding': '12px 24px',
+                    'marginRight': '4px',
+                    'borderRadius': '8px 8px 0 0',
+                    'fontWeight': 'bold',
+                    'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
+                },
+                children=[]  # Content will be shown in wrapper below tabs
             )
+        )
 
     if not sheet_tabs:
         return html.Div([
@@ -1289,7 +1317,8 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
                 style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
         ])
 
-    tabs = dcc.Tabs(
+    tabs = html.Div([
+        dcc.Tabs(
         id='sheet-validation-tabs',
         value=sheets_with_data[0] if sheets_with_data else None,
         children=sheet_tabs,
@@ -1303,42 +1332,31 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
             "primary": "#4CAF50",
             "background": "#f5f5f5"
         }
-    )
+        ),
+        html.Div(id='sheet-validation-content-wrapper', style={'marginTop': '20px'})
+    ])
 
-    # Add a script component to style the tab labels with colors
-    # This will be executed after the tabs are rendered
+    # Add script to color the counts in tab labels
     style_script = html.Script(r"""
         (function() {
             function styleTabLabels() {
-                // Find the tab container
                 const tabContainer = document.getElementById('sheet-validation-tabs');
                 if (!tabContainer) {
-                    console.log('Tab container not found');
                     return;
                 }
 
-                // Dash tabs are typically rendered with role="tablist" and children with role="tab"
-                // Try multiple selectors to find tab elements
-                let tabLabels = tabContainer.querySelectorAll('[role="tab"]');
-
-                // If not found, try other common patterns
-                if (tabLabels.length === 0) {
-                    tabLabels = tabContainer.querySelectorAll('.tab, [class*="tab"], [class*="Tab"]');
-                }
-
-                // Also try finding by data attributes or IDs
-                if (tabLabels.length === 0) {
-                    tabLabels = tabContainer.querySelectorAll('div, button, a');
-                }
-
-                console.log('Found', tabLabels.length, 'potential tab elements');
-
-                tabLabels.forEach((tab, index) => {
-                    // Try to find the actual text node or label element
+                const tabLabels = tabContainer.querySelectorAll('[role="tab"]');
+                
+                tabLabels.forEach((tab) => {
+                    // Skip if already processed
+                    if (tab.dataset.styled === 'true') {
+                        return;
+                    }
+                    
                     let textElement = tab;
                     let originalText = tab.textContent || tab.innerText || '';
 
-                    // If the tab has children, try to find the label element
+                    // Find the text element
                     if (tab.children.length > 0) {
                         for (let child of tab.children) {
                             const childText = child.textContent || child.innerText || '';
@@ -1351,79 +1369,74 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
                     }
 
                     if (originalText && (originalText.includes('valid') || originalText.includes('invalid'))) {
-                        // Check if already styled to avoid re-processing
-                        if (textElement.querySelector && textElement.querySelector('span[style*="color"]')) {
+                        // Check if already styled (look for CSS classes or inline styles)
+                        if (textElement.querySelector && (textElement.querySelector('span.valid-count') || textElement.querySelector('span[style*="color"]'))) {
+                            tab.dataset.styled = 'true';
                             return;
                         }
 
-                        // Create styled version with spans
-                        const styled = originalText.replace(
-                            /(\d+)\s+valid/g, 
-                            '<span style="color: #4CAF50 !important; font-weight: bold !important;">$1 valid</span>'
-                        ).replace(
-                            /(\d+)\s+invalid/g, 
-                            '<span style="color: #f44336 !important; font-weight: bold !important;">$1 invalid</span>'
-                        );
-
-                        if (styled !== originalText && styled.includes('<span')) {
+                        // Match pattern: (number valid / number invalid)
+                        const match = originalText.match(/\((\d+)\s+valid\s+\/\s+(\d+)\s+invalid\)/);
+                        if (match) {
+                            const validCount = match[1];
+                            const invalidCount = match[2];
+                            
+                            // Replace with colored spans using CSS classes
+                            const styled = originalText.replace(
+                                /\((\d+)\s+valid\s+\/\s+(\d+)\s+invalid\)/,
+                                '(<span class="valid-count">' + validCount + '</span> valid / <span class="invalid-count">' + invalidCount + '</span> invalid)'
+                            );
+                            
                             try {
                                 textElement.innerHTML = styled;
-                                console.log('Styled tab', index, ':', originalText.substring(0, 50));
+                                tab.dataset.styled = 'true';
                             } catch (e) {
-                                console.error('Error styling tab', index, ':', e);
+                                console.error('Error styling tab:', e);
                             }
                         }
                     }
                 });
             }
 
-            // Multiple attempts to ensure tabs are styled
-            function attemptStyle() {
-                styleTabLabels();
-            }
-
-            // Run immediately
-            attemptStyle();
-
-            // Run after short delays
-            setTimeout(attemptStyle, 100);
-            setTimeout(attemptStyle, 300);
-            setTimeout(attemptStyle, 500);
-            setTimeout(attemptStyle, 1000);
-
-            // Use MutationObserver to watch for changes
-            const observer = new MutationObserver(function(mutations) {
-                setTimeout(attemptStyle, 50);
-            });
-
+            // Run after tabs are rendered
+            setTimeout(styleTabLabels, 100);
+            setTimeout(styleTabLabels, 300);
+            setTimeout(styleTabLabels, 500);
+            
+            // Watch for tab changes (throttled to prevent excessive updates)
             const container = document.getElementById('sheet-validation-tabs');
             if (container) {
+                let observerTimeout = null;
+                const observer = new MutationObserver(function() {
+                    // Throttle to prevent excessive re-renders
+                    if (observerTimeout) {
+                        clearTimeout(observerTimeout);
+                    }
+                    observerTimeout = setTimeout(function() {
+                        styleTabLabels();
+                    }, 300);
+                });
                 observer.observe(container, { 
                     childList: true, 
-                    subtree: true,
-                    characterData: true,
-                    attributes: true
+                    subtree: false,
+                    attributes: false,
+                    characterData: false
                 });
             }
-
-            // Also run on various events
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', attemptStyle);
-            }
-
-            window.addEventListener('load', function() {
-                setTimeout(attemptStyle, 200);
-            });
-
-            // Watch for Dash renderer updates
-            if (window.dash_clientside) {
-                window.dash_clientside.no_update = function() {
-                    setTimeout(attemptStyle, 100);
-                };
+            
+            // Prevent default link behavior on tab clicks to avoid page reload
+            if (container) {
+                container.addEventListener('click', function(e) {
+                    const tab = e.target.closest('[role="tab"]');
+                    if (tab) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }
+                }, true);
             }
         })();
-    """
-                               )
+    """)
+
 
     header_bar = html.Div(
         [
@@ -1451,24 +1464,41 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
         }
     )
 
-    return html.Div([header_bar, tabs, style_script], style={"marginTop": "8px"})
+    return html.Div([
+        header_bar, 
+        tabs, 
+        style_script
+    ], style={
+        "marginTop": "8px",
+        "transition": "opacity 0.3s ease-in-out"
+    })
 
 
 # Callback to populate sheet content when tab is selected
 @app.callback(
-    Output({'type': 'sheet-validation-content', 'index': MATCH}, 'children'),
+    Output('sheet-validation-content-wrapper', 'children'),
     [Input('sheet-validation-tabs', 'value')],
     [State('stored-json-validation-results', 'data'),
-     State('stored-all-sheets-data', 'data')]
+     State('stored-all-sheets-data', 'data')],
+    prevent_initial_call=False
 )
 def populate_sheet_validation_content(selected_sheet_name, validation_results, all_sheets_data):
     if validation_results is None or selected_sheet_name is None:
-        return []
+        return html.Div(style={'opacity': 0, 'transition': 'opacity 0.3s ease-in-out'})
 
     if not all_sheets_data or selected_sheet_name not in all_sheets_data:
-        return html.Div("No data available for this sheet.")
+        return html.Div("No data available for this sheet.", style={'opacity': 1, 'transition': 'opacity 0.3s ease-in-out'})
 
-    return make_sheet_validation_panel(selected_sheet_name, validation_results, all_sheets_data)
+    # Wrap content with smooth transition
+    content = make_sheet_validation_panel(selected_sheet_name, validation_results, all_sheets_data)
+    return html.Div(
+        content,
+        style={
+            'opacity': 1,
+            'transition': 'opacity 0.3s ease-in-out',
+            'animation': 'fadeIn 0.3s ease-in-out'
+        }
+    )
 
 
 def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_sheets_data: dict):
@@ -1687,27 +1717,27 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
     report_sections = []
 
     # Errors by field
-    if error_fields_count:
-        error_items = sorted(error_fields_count.items(), key=lambda x: x[1], reverse=True)
-        report_sections.append(
-            html.Div([
-                html.H5("Errors by Field", style={
-                    'marginTop': '20px',
-                    'marginBottom': '15px',
-                    'color': '#f44336',
-                    'borderBottom': '2px solid #f44336',
-                    'paddingBottom': '8px'
-                }),
-                html.Ul([
-                    html.Li([
-                        html.Span(f"{field}: ", style={'fontWeight': 'bold'}),
-                        html.Span(f"{count} error(s)", style={'color': '#666'})
-                    ], style={'marginBottom': '6px'})
-                    for field, count in error_items
-                ], style={'padding': '10px', 'backgroundColor': '#ffebee', 'borderRadius': '6px',
-                          'listStylePosition': 'inside'})
-            ])
-        )
+    # if error_fields_count:
+    #     error_items = sorted(error_fields_count.items(), key=lambda x: x[1], reverse=True)
+    #     report_sections.append(
+    #         html.Div([
+    #             html.H5("Errors by Field", style={
+    #                 'marginTop': '20px',
+    #                 'marginBottom': '15px',
+    #                 'color': '#f44336',
+    #                 'borderBottom': '2px solid #f44336',
+    #                 'paddingBottom': '8px'
+    #             }),
+    #             html.Ul([
+    #                 html.Li([
+    #                     html.Span(f"{field}: ", style={'fontWeight': 'bold'}),
+    #                     html.Span(f"{count} error(s)", style={'color': '#666'})
+    #                 ], style={'marginBottom': '6px'})
+    #                 for field, count in error_items
+    #             ], style={'padding': '10px', 'backgroundColor': '#ffebee', 'borderRadius': '6px',
+    #                       'listStylePosition': 'inside'})
+    #         ])
+    #     )
 
     # Warnings by field
     if warning_fields_count:
@@ -1764,8 +1794,6 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
     zebra = [{'if': {'row_index': 'odd'}, 'backgroundColor': 'rgb(248, 248, 248)'}]
 
     blocks = [
-        html.H4(f"Validation Results - {sheet_name}", style={'textAlign': 'center', 'margin': '10px 0'})
-        ,
         html.Div([
             DataTable(
                 id={"type": "sheet-result-table", "sheet_name": sheet_name, "panel_id": panel_id},
@@ -2033,8 +2061,8 @@ def _toggle_biosamples_form(v):
 def _disable_submit(u, p, v):
     if not v or "results" not in v:
         return True
-    valid_cnt, _ = _valid_invalid_counts(v)
-    if valid_cnt == 0:
+    valid_cnt, invalid = _valid_invalid_counts(v)
+    if invalid == 0:
         return True
     return not (u and p)
 

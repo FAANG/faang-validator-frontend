@@ -216,6 +216,10 @@ def register_analysis_callbacks(app):
             sheets_with_data = []
 
             for sheet in sheet_names:
+                # Skip faang_field_values sheet
+                if sheet.lower() == "faang_field_values":
+                    continue
+                
                 df_sheet = excel_file.parse(sheet, dtype=str)
                 df_sheet = df_sheet.fillna("")
 

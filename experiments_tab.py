@@ -87,7 +87,7 @@ def create_biosamples_form_experiments():
 
 # Backend API URL - can be configured via environment variable
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
-                                 'https://faang-validator-backend-service-964531885708.europe-west2.run.app')
+                                 'http://localhost:8000')
 
 
 # Shared utility functions (copied to avoid circular imports)
@@ -332,6 +332,10 @@ def register_experiments_callbacks(app):
             sheets_with_data = []
 
             for sheet in sheet_names:
+                # Skip faang_field_values sheet
+                if sheet.lower() == "faang_field_values":
+                    continue
+                
                 df_sheet = excel_file.parse(sheet, dtype=str)
                 df_sheet = df_sheet.fillna("")
 
@@ -975,52 +979,110 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
     def _map_field_to_column(field_name, columns):
         if not field_name:
             return None
-        if field_name.startswith("Health Status") and ".term" in field_name:
-            try:
-                parts = field_name.split(".")
-                idx = int(parts[1])
-            except Exception:
-                idx = 0
+        
+        # Handle Health Status fields (with or without .term)
+        if "Health Status" in field_name:
+            if ".term" in field_name:
+                try:
+                    parts = field_name.split(".")
+                    idx = int(parts[1])
+                except Exception:
+                    idx = 0
 
-            def _clean_col_name(col):
-                col_str = str(col)
-                if '.' in col_str:
-                    return col_str.split('.')[0]
-                return col_str
+                def _clean_col_name(col):
+                    col_str = str(col)
+                    if '.' in col_str:
+                        return col_str.split('.')[0]
+                    return col_str
 
-            health_status_cols = []
-            for i, col in enumerate(columns):
-                col_str = str(col)
-                if "Health Status" in col_str and "Term Source ID" not in col_str:
-                    health_status_cols.append((i, col))
-            term_cols_after_health_status = []
-            for hs_idx, hs_col in health_status_cols:
-                next_idx = hs_idx + 1
-                if next_idx < len(columns):
-                    next_col = columns[next_idx]
-                    cleaned_next = _clean_col_name(next_col)
-                    if cleaned_next == "Term Source ID":
-                        term_cols_after_health_status.append(next_col)
-            if term_cols_after_health_status:
-                if 0 <= idx < len(term_cols_after_health_status):
-                    return term_cols_after_health_status[idx]
-                return term_cols_after_health_status[-1] if term_cols_after_health_status else None
-        direct = _resolve_col(field_name, columns)
-        if direct:
-            return direct
-        if field_name == "Term Source ID" or field_name.lower() == "term source id":
+                health_status_cols = []
+                for i, col in enumerate(columns):
+                    col_str = str(col)
+                    if "Health Status" in col_str and "Term Source ID" not in col_str:
+                        health_status_cols.append((i, col))
+                term_cols_after_health_status = []
+                for hs_idx, hs_col in health_status_cols:
+                    next_idx = hs_idx + 1
+                    if next_idx < len(columns):
+                        next_col = columns[next_idx]
+                        cleaned_next = _clean_col_name(next_col)
+                        if cleaned_next == "Term Source ID":
+                            term_cols_after_health_status.append(next_col)
+                if term_cols_after_health_status:
+                    if 0 <= idx < len(term_cols_after_health_status):
+                        return term_cols_after_health_status[idx]
+                    return term_cols_after_health_status[-1] if term_cols_after_health_status else None
+            else:
+                # Health Status without .term - find the first Health Status column
+                for col in columns:
+                    col_str = str(col)
+                    if "Health Status" in col_str and "Term Source ID" not in col_str:
+                        return col
+        
+        # Handle Cell Type fields (with or without .term)
+        if "Cell Type" in field_name:
+            if ".term" in field_name:
+                try:
+                    parts = field_name.split(".")
+                    idx = int(parts[1])
+                except Exception:
+                    idx = 0
+
+                def _clean_col_name(col):
+                    col_str = str(col)
+                    if '.' in col_str:
+                        return col_str.split('.')[0]
+                    return col_str
+
+                cell_type_cols = []
+                for i, col in enumerate(columns):
+                    col_str = str(col)
+                    if "Cell Type" in col_str and "Term Source ID" not in col_str:
+                        cell_type_cols.append((i, col))
+                term_cols_after_cell_type = []
+                for ct_idx, ct_col in cell_type_cols:
+                    next_idx = ct_idx + 1
+                    if next_idx < len(columns):
+                        next_col = columns[next_idx]
+                        cleaned_next = _clean_col_name(next_col)
+                        if cleaned_next == "Term Source ID":
+                            term_cols_after_cell_type.append(next_col)
+                if term_cols_after_cell_type:
+                    if 0 <= idx < len(term_cols_after_cell_type):
+                        return term_cols_after_cell_type[idx]
+                    return term_cols_after_cell_type[-1] if term_cols_after_cell_type else None
+            else:
+                # Cell Type without .term - find the first Cell Type column
+                for col in columns:
+                    col_str = str(col)
+                    if "Cell Type" in col_str and "Term Source ID" not in col_str:
+                        return col
+        
+        # Handle Term Source ID fields - check if field starts with "Term Source ID"
+        if field_name and field_name.lower().startswith("term source id"):
+            # Find the first "Term Source ID" column (without numbered suffix first, then with suffix)
             for col in columns:
                 col_str = str(col)
-                if col_str.lower() == "term source id":
+                col_lower = col_str.lower()
+                # Try exact match first
+                if col_lower == "term source id":
                     return col
+            # If no exact match, try numbered versions (Term Source ID.1, Term Source ID.2, etc.)
             for col in columns:
                 col_str = str(col)
                 col_lower = col_str.lower()
                 if col_lower.startswith("term source id."):
-                    suffix = col_lower[len("term source id."):]
-                    if suffix and suffix.isdigit():
-                        if col_str[:len("Term Source ID")].lower() == "term source id":
-                            return col
+                    # This is a numbered Term Source ID column - return the first one found
+                    return col
+            # If still no match, try columns that contain "Term Source ID" (case insensitive)
+            for col in columns:
+                col_str = str(col)
+                if "term source id" in col_str.lower():
+                    return col
+        
+        direct = _resolve_col(field_name, columns)
+        if direct:
+            return direct
         if "." in field_name:
             base = field_name.split(".", 1)[0]
             base_match = _resolve_col(base, columns)
@@ -1044,7 +1106,24 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
         if match_key in error_map:
             field_errors = error_map[match_key] or {}
             for field, msgs in field_errors.items():
-                col = _map_field_to_column(field, df_all.columns)
+                msgs_list = _as_list(msgs)
+                lower_msgs = [m.lower() for m in msgs_list]
+                lower_field = field.lower()
+                
+                # Check if error messages or field name mention "Health Status", "Cell Type", or "Term Source ID"
+                # and map to those columns even if field name doesn't match exactly
+                col = None
+                if "health status" in lower_field or any("health status" in lm for lm in lower_msgs):
+                    col = _map_field_to_column("Health Status", df_all.columns)
+                elif "cell type" in lower_field or any("cell type" in lm for lm in lower_msgs):
+                    col = _map_field_to_column("Cell Type", df_all.columns)
+                elif lower_field.startswith("term source id") or any(lm.startswith("term source id") for lm in lower_msgs):
+                    # Map to first Term Source ID column
+                    col = _map_field_to_column("Term Source ID", df_all.columns)
+                
+                # If not found via message check, use normal mapping
+                if not col:
+                    col = _map_field_to_column(field, df_all.columns)
                 if not col:
                     col = field
 
@@ -1060,8 +1139,6 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
                 if not col_id:
                     continue
 
-                msgs_list = _as_list(msgs)
-                lower_msgs = [m.lower() for m in msgs_list]
                 is_extra = any("extra inputs are not permitted" in lm for lm in lower_msgs)
                 is_warning_like = any("warning" in lm for lm in lower_msgs)
                 prefix = "**Warning**: " if (is_extra or is_warning_like) else "**Error**: "
@@ -1081,7 +1158,24 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
         if match_key in warning_map:
             field_warnings = warning_map[match_key] or {}
             for field, msgs in field_warnings.items():
-                col = _map_field_to_column(field, df_all.columns)
+                msgs_list = _as_list(msgs)
+                lower_msgs = [m.lower() for m in msgs_list]
+                lower_field = field.lower()
+                
+                # Check if warning messages or field name mention "Health Status", "Cell Type", or "Term Source ID"
+                # and map to those columns even if field name doesn't match exactly
+                col = None
+                if "health status" in lower_field or any("health status" in lm for lm in lower_msgs):
+                    col = _map_field_to_column("Health Status", df_all.columns)
+                elif "cell type" in lower_field or any("cell type" in lm for lm in lower_msgs):
+                    col = _map_field_to_column("Cell Type", df_all.columns)
+                elif lower_field.startswith("term source id") or any(lm.startswith("term source id") for lm in lower_msgs):
+                    # Map to first Term Source ID column
+                    col = _map_field_to_column("Term Source ID", df_all.columns)
+                
+                # If not found via message check, use normal mapping
+                if not col:
+                    col = _map_field_to_column(field, df_all.columns)
                 if not col:
                     col = field
 
@@ -1096,7 +1190,6 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
                             break
                 if not col_id:
                     continue
-                msgs_list = _as_list(msgs)
                 warn_text = "**Warning**: " + (field if field else 'General') + " — " + " | ".join(msgs_list)
                 if col_id in tips:
                     existing = tips[col_id].get("value", "")
