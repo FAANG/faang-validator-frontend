@@ -253,8 +253,7 @@ def create_validation_results_area(tab_type: str):
             id=f"loading-validation-{tab_type}",
             type="circle",
             children=html.Div(id=f'output-data-upload-{tab_type}')
-        ),
-        html.Div(id=f"biosamples-results-table-{tab_type}")
+        )
     ])
 
 
@@ -282,5 +281,6 @@ def create_tab_content(tab_type: str):
         create_file_upload_area(tab_type),
         create_validation_results_area(tab_type),
         biosamples_form,
+        html.Div(id=f"biosamples-results-table-{tab_type}"),  # Results table at the end
     ])
 

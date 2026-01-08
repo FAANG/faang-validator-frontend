@@ -1275,8 +1275,8 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
         # Make sheet name title case (first letter of each word capital)
         sheet_name_title = sheet_name.title()
         
-        # Create label using results_by_type summary
-        label = f"{sheet_name_title} ({valid_count} valid / {invalid_count} invalid)"
+        # Create label using results_by_type summary with inline green color for valid count
+        label = f"{sheet_name_title} (<span style='color: #4CAF50; font-weight: bold;'>{valid_count} valid </span>/ {invalid_count} invalid)"
 
         sheets_with_data.append(sheet_name)
         sheet_tabs.append(
@@ -1337,107 +1337,139 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
     ])
 
     # Add script to color the counts in tab labels
-    style_script = html.Script(r"""
-        (function() {
-            function styleTabLabels() {
-                const tabContainer = document.getElementById('sheet-validation-tabs');
-                if (!tabContainer) {
-                    return;
-                }
+    # This will be executed after the tabs are rendered
+    style_script = html.Script("""
+           (function() {
+               function styleTabLabels() {
+                   // Find the tab container - FIXED: use correct ID
+                   const tabContainer = document.getElementById('sheet-validation-tabs');
+                   if (!tabContainer) {
+                       console.log('[Tab Styling] Tab container not found: sheet-validation-tabs');
+                       return;
+                   }
 
-                const tabLabels = tabContainer.querySelectorAll('[role="tab"]');
-                
-                tabLabels.forEach((tab) => {
-                    // Skip if already processed
-                    if (tab.dataset.styled === 'true') {
-                        return;
-                    }
-                    
-                    let textElement = tab;
-                    let originalText = tab.textContent || tab.innerText || '';
+                   // Dash tabs are typically rendered with role="tablist" and children with role="tab"
+                   let tabLabels = tabContainer.querySelectorAll('[role="tab"]');
+                   
+                   if (tabLabels.length === 0) {
+                       // Try alternative selectors
+                       tabLabels = tabContainer.querySelectorAll('.tab, [class*="tab"], [class*="Tab"]');
+                   }
+                   
+                   if (tabLabels.length === 0) {
+                       tabLabels = tabContainer.querySelectorAll('div[role="tab"], button[role="tab"]');
+                   }
 
-                    // Find the text element
-                    if (tab.children.length > 0) {
-                        for (let child of tab.children) {
-                            const childText = child.textContent || child.innerText || '';
-                            if (childText && (childText.includes('valid') || childText.includes('invalid'))) {
-                                textElement = child;
-                                originalText = childText;
-                                break;
-                            }
-                        }
-                    }
+                   console.log('[Tab Styling] Found', tabLabels.length, 'tab elements');
 
-                    if (originalText && (originalText.includes('valid') || originalText.includes('invalid'))) {
-                        // Check if already styled (look for CSS classes or inline styles)
-                        if (textElement.querySelector && (textElement.querySelector('span.valid-count') || textElement.querySelector('span[style*="color"]'))) {
-                            tab.dataset.styled = 'true';
-                            return;
-                        }
+                   tabLabels.forEach((tab, index) => {
+                       // Get the text content
+                       let textElement = tab;
+                       let originalText = tab.textContent || tab.innerText || '';
 
-                        // Match pattern: (number valid / number invalid)
-                        const match = originalText.match(/\((\d+)\s+valid\s+\/\s+(\d+)\s+invalid\)/);
-                        if (match) {
-                            const validCount = match[1];
-                            const invalidCount = match[2];
-                            
-                            // Replace with colored spans using CSS classes
-                            const styled = originalText.replace(
-                                /\((\d+)\s+valid\s+\/\s+(\d+)\s+invalid\)/,
-                                '(<span class="valid-count">' + validCount + '</span> valid / <span class="invalid-count">' + invalidCount + '</span> invalid)'
-                            );
-                            
-                            try {
-                                textElement.innerHTML = styled;
-                                tab.dataset.styled = 'true';
-                            } catch (e) {
-                                console.error('Error styling tab:', e);
-                            }
-                        }
-                    }
-                });
-            }
+                       // If the tab has children, check them for text
+                       if (tab.children && tab.children.length > 0) {
+                           for (let child of Array.from(tab.children)) {
+                               const childText = child.textContent || child.innerText || '';
+                               if (childText && (childText.includes('valid') || childText.includes('invalid'))) {
+                                   textElement = child;
+                                   originalText = childText;
+                                   break;
+                               }
+                           }
+                       }
 
-            // Run after tabs are rendered
-            setTimeout(styleTabLabels, 100);
-            setTimeout(styleTabLabels, 300);
-            setTimeout(styleTabLabels, 500);
-            
-            // Watch for tab changes (throttled to prevent excessive updates)
-            const container = document.getElementById('sheet-validation-tabs');
-            if (container) {
-                let observerTimeout = null;
-                const observer = new MutationObserver(function() {
-                    // Throttle to prevent excessive re-renders
-                    if (observerTimeout) {
-                        clearTimeout(observerTimeout);
-                    }
-                    observerTimeout = setTimeout(function() {
-                        styleTabLabels();
-                    }, 300);
-                });
-                observer.observe(container, { 
-                    childList: true, 
-                    subtree: false,
-                    attributes: false,
-                    characterData: false
-                });
-            }
-            
-            // Prevent default link behavior on tab clicks to avoid page reload
-            if (container) {
-                container.addEventListener('click', function(e) {
-                    const tab = e.target.closest('[role="tab"]');
-                    if (tab) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
-                }, true);
-            }
-        })();
-    """)
+                       if (originalText && (originalText.includes('valid') || originalText.includes('invalid'))) {
+                           // Check if already styled to avoid re-processing
+                           if (textElement.querySelector && textElement.querySelector('span[style*="color"]')) {
+                               return;
+                           }
 
+                           // Match pattern: (number valid / number invalid)
+                           // FIXED: Better regex pattern that matches the actual format
+                           const match = originalText.match(/\\((\\d+)\\s+valid\\s+\\/\\s+(\\d+)\\s+invalid\\)/);
+                           if (match) {
+                               const validCount = match[1];
+                               const invalidCount = match[2];
+                               
+                               // Replace with colored spans - color both number and word
+                               const styled = originalText.replace(
+                                   /\\((\\d+)\\s+valid\\s+\\/\\s+(\\d+)\\s+invalid\\)/,
+                                   '(<span style="color: #4CAF50 !important; font-weight: bold !important;">' + validCount + ' valid</span> / <span style="color: #f44336 !important; font-weight: bold !important;">' + invalidCount + ' invalid</span>)'
+                               );
 
+                               if (styled !== originalText) {
+                                   try {
+                                       textElement.innerHTML = styled;
+                                       console.log('[Tab Styling] Successfully styled tab', index, ':', originalText.substring(0, 50));
+                                   } catch (e) {
+                                       console.error('[Tab Styling] Error styling tab', index, ':', e);
+                                   }
+                               }
+                           } else {
+                               // Fallback: try individual replacements if pattern doesn't match
+                               // Color both number and word
+                               const styled = originalText.replace(
+                                   /(\\d+)\\s+valid/g, 
+                                   '<span style="color: #4CAF50 !important; font-weight: bold !important;">$1 valid</span>'
+                               ).replace(
+                                   /(\\d+)\\s+invalid/g, 
+                                   '<span style="color: #f44336 !important; font-weight: bold !important;">$1 invalid</span>'
+                               );
+
+                               if (styled !== originalText && styled.includes('<span')) {
+                                   try {
+                                       textElement.innerHTML = styled;
+                                       console.log('[Tab Styling] Successfully styled tab (fallback)', index);
+                                   } catch (e) {
+                                       console.error('[Tab Styling] Error styling tab (fallback)', index, ':', e);
+                                   }
+                               }
+                           }
+                       }
+                   });
+               }
+
+               // Multiple attempts to ensure tabs are styled
+               function attemptStyle() {
+                   styleTabLabels();
+               }
+
+               // Run immediately
+               attemptStyle();
+
+               // Run after short delays to catch tabs that render later
+               setTimeout(attemptStyle, 100);
+               setTimeout(attemptStyle, 300);
+               setTimeout(attemptStyle, 500);
+               setTimeout(attemptStyle, 1000);
+               setTimeout(attemptStyle, 2000);
+
+               // Use MutationObserver to watch for changes
+               const container = document.getElementById('sheet-validation-tabs');
+               if (container) {
+                   const observer = new MutationObserver(function(mutations) {
+                       setTimeout(attemptStyle, 50);
+                   });
+                   
+                   observer.observe(container, { 
+                       childList: true, 
+                       subtree: true,
+                       characterData: true,
+                       attributes: true
+                   });
+               }
+
+               // Also run on various events
+               if (document.readyState === 'loading') {
+                   document.addEventListener('DOMContentLoaded', attemptStyle);
+               }
+
+               window.addEventListener('load', function() {
+                   setTimeout(attemptStyle, 200);
+               });
+           })();
+       """)
     header_bar = html.Div(
         [
             html.Div(),
@@ -2051,7 +2083,8 @@ def _toggle_biosamples_form(v):
 
 
 @app.callback(
-    Output("biosamples-submit-btn-samples", "disabled"),
+    [Output("biosamples-submit-btn-samples", "disabled"),
+     Output("biosamples-submit-btn-samples", "style")],
     [
         Input("biosamples-username-samples", "value"),
         Input("biosamples-password-samples", "value"),
@@ -2059,12 +2092,29 @@ def _toggle_biosamples_form(v):
     ],
 )
 def _disable_submit(u, p, v):
+    # Default enabled style
+    enabled_style = {
+        "backgroundColor": "#673ab7", "color": "white", "padding": "10px 18px",
+        "border": "none", "borderRadius": "8px", "cursor": "pointer",
+        "fontSize": "16px", "width": "140px"
+    }
+    # Disabled style (grayed out)
+    disabled_style = {
+        "backgroundColor": "#cccccc", "color": "#666666", "padding": "10px 18px",
+        "border": "none", "borderRadius": "8px", "cursor": "not-allowed",
+        "fontSize": "16px", "width": "140px", "opacity": "0.6"
+    }
+    
     if not v or "results" not in v:
-        return True
+        return True, disabled_style
     valid_cnt, invalid = _valid_invalid_counts(v)
-    if invalid == 0:
-        return True
-    return not (u and p)
+    # Enable submit button only when total samples == valid samples (i.e., invalid == 0)
+    # This means all samples are valid
+    if invalid > 0:
+        return True, disabled_style  # Disable if there are invalid samples
+    # All samples are valid, enable if username and password are provided
+    is_enabled = u and p
+    return not is_enabled, enabled_style if is_enabled else disabled_style
 
 
 @app.callback(
@@ -2225,24 +2275,30 @@ app.clientside_callback(
     """
     function(validation_results) {
         if (!validation_results) {
-            return window.dash_clientside.no_update;
+            if (window.dash_clientside && window.dash_clientside.no_update) {
+                return window.dash_clientside.no_update;
+            }
+            return null;
         }
 
-        // Function to style tab labels
+        // Function to style tab labels - FIXED: use correct ID
         function styleTabLabels() {
-            const tabContainer = document.getElementById('sample-type-tabs');
+            const tabContainer = document.getElementById('sheet-validation-tabs');
             if (!tabContainer) {
+                console.log('[Clientside] Tab container not found: sheet-validation-tabs');
                 return;
             }
 
             // Try multiple selectors to find tab elements
             let tabLabels = tabContainer.querySelectorAll('[role="tab"]');
             if (tabLabels.length === 0) {
-                tabLabels = tabContainer.querySelectorAll('.tab, [class*="tab"], [class*="Tab"], div[class*="tab"]');
+                tabLabels = tabContainer.querySelectorAll('.tab, [class*="tab"], [class*="Tab"]');
             }
             if (tabLabels.length === 0) {
-                tabLabels = tabContainer.querySelectorAll('div, button, a, span');
+                tabLabels = tabContainer.querySelectorAll('div[role="tab"], button[role="tab"]');
             }
+
+            console.log('[Clientside] Found', tabLabels.length, 'tab elements');
 
             tabLabels.forEach((tab) => {
                 let textElement = tab;
@@ -2266,20 +2322,42 @@ app.clientside_callback(
                         return;
                     }
 
-                    // Create styled version
-                    const styled = originalText.replace(
-                        /(\\d+)\\s+valid/g, 
-                        '<span style="color: #4CAF50 !important; font-weight: bold !important;">$1 valid</span>'
-                    ).replace(
-                        /(\\d+)\\s+invalid/g, 
-                        '<span style="color: #f44336 !important; font-weight: bold !important;">$1 invalid</span>'
-                    );
+                    // Match pattern: (number valid / number invalid)
+                    const match = originalText.match(/\\((\\d+)\\s+valid\\s+\\/\\s+(\\d+)\\s+invalid\\)/);
+                    if (match) {
+                        const validCount = match[1];
+                        const invalidCount = match[2];
+                        
+                        const styled = originalText.replace(
+                            /\\((\\d+)\\s+valid\\s+\\/\\s+(\\d+)\\s+invalid\\)/,
+                            '(<span style="color: #4CAF50 !important; font-weight: bold !important;">' + validCount + ' valid</span> / <span style="color: #f44336 !important; font-weight: bold !important;">' + invalidCount + ' invalid</span>)'
+                        );
 
-                    if (styled !== originalText && styled.includes('<span')) {
-                        try {
-                            textElement.innerHTML = styled;
-                        } catch (e) {
-                            console.error('Error styling tab:', e);
+                        if (styled !== originalText) {
+                            try {
+                                textElement.innerHTML = styled;
+                                console.log('[Clientside] Successfully styled tab');
+                            } catch (e) {
+                                console.error('[Clientside] Error styling tab:', e);
+                            }
+                        }
+                    } else {
+                        // Fallback: individual replacements
+                        // Color both number and word
+                        const styled = originalText.replace(
+                            /(\\d+)\\s+valid/g, 
+                            '<span style="color: #4CAF50 !important; font-weight: bold !important;">$1 valid</span>'
+                        ).replace(
+                            /(\\d+)\\s+invalid/g, 
+                            '<span style="color: #f44336 !important; font-weight: bold !important;">$1 invalid</span>'
+                        );
+
+                        if (styled !== originalText && styled.includes('<span')) {
+                            try {
+                                textElement.innerHTML = styled;
+                            } catch (e) {
+                                console.error('[Clientside] Error styling tab:', e);
+                            }
                         }
                     }
                 }
@@ -2290,8 +2368,13 @@ app.clientside_callback(
         setTimeout(styleTabLabels, 100);
         setTimeout(styleTabLabels, 500);
         setTimeout(styleTabLabels, 1000);
+        setTimeout(styleTabLabels, 2000);
 
-        return window.dash_clientside.no_update;
+        // Return no_update safely
+        if (window.dash_clientside && window.dash_clientside.no_update) {
+            return window.dash_clientside.no_update;
+        }
+        return null;
     }
     """,
     Output('validation-results-container', 'children', allow_duplicate=True),
