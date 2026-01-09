@@ -71,15 +71,21 @@ def create_biosamples_form_analysis():
             html.Div(id="biosamples-status-banner-ena-analysis",
                      style={"display": "none", "padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px"}),
 
-            html.Button(
-                "Submit", id="biosamples-submit-btn-ena-analysis", n_clicks=0,
-                style={
-                    "backgroundColor": "#673ab7", "color": "white", "padding": "10px 18px",
-                    "border": "none", "borderRadius": "8px", "cursor": "pointer",
-                    "fontSize": "16px", "width": "140px"
-                }
+            dcc.Loading(
+                id="loading-submit-ena-analysis",
+                type="circle",
+                children=html.Div([
+                    html.Button(
+                        "Submit", id="biosamples-submit-btn-ena-analysis", n_clicks=0,
+                        style={
+                            "backgroundColor": "#673ab7", "color": "white", "padding": "10px 18px",
+                            "border": "none", "borderRadius": "8px", "cursor": "pointer",
+                            "fontSize": "16px", "width": "140px"
+                        }
+                    ),
+                    html.Div(id="biosamples-submit-msg-ena-analysis", style={"marginTop": "10px"}),
+                ])
             ),
-            html.Div(id="biosamples-submit-msg-ena-analysis", style={"marginTop": "10px"}),
         ],
         id="biosamples-form-ena-analysis",
         style={"display": "none", "marginTop": "16px"},

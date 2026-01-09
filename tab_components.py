@@ -151,15 +151,21 @@ def create_biosamples_form(tab_type: str):
             html.Div(id=f"biosamples-status-banner-{tab_type}",
                      style={"display": "none", "padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px"}),
 
-            html.Button(
-                "Submit", id=f"biosamples-submit-btn-{tab_type}", n_clicks=0,
-                style={
-                    "backgroundColor": "#673ab7", "color": "white", "padding": "10px 18px",
-                    "border": "none", "borderRadius": "8px", "cursor": "pointer",
-                    "fontSize": "16px", "width": "140px"
-                }
+            dcc.Loading(
+                id=f"loading-submit-{tab_type}",
+                type="circle",
+                children=html.Div([
+                    html.Button(
+                        "Submit", id=f"biosamples-submit-btn-{tab_type}", n_clicks=0,
+                        style={
+                            "backgroundColor": "#673ab7", "color": "white", "padding": "10px 18px",
+                            "border": "none", "borderRadius": "8px", "cursor": "pointer",
+                            "fontSize": "16px", "width": "140px"
+                        }
+                    ),
+                    html.Div(id=f"biosamples-submit-msg-{tab_type}", style={"marginTop": "10px"}),
+                ])
             ),
-            html.Div(id=f"biosamples-submit-msg-{tab_type}", style={"marginTop": "10px"}),
         ],
         id=f"biosamples-form-{tab_type}",
         style={"display": "none", "marginTop": "16px"},
@@ -223,15 +229,21 @@ def create_ena_form(tab_type: str):
             html.Div(id=f"biosamples-status-banner-{tab_type}",
                      style={"display": "none", "padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px"}),
 
-            html.Button(
-                "Submit", id=f"biosamples-submit-btn-{tab_type}", n_clicks=0,
-                style={
-                    "backgroundColor": "#673ab7", "color": "white", "padding": "10px 18px",
-                    "border": "none", "borderRadius": "8px", "cursor": "pointer",
-                    "fontSize": "16px", "width": "140px"
-                }
+            dcc.Loading(
+                id=f"loading-submit-{tab_type}",
+                type="circle",
+                children=html.Div([
+                    html.Button(
+                        "Submit", id=f"biosamples-submit-btn-{tab_type}", n_clicks=0,
+                        style={
+                            "backgroundColor": "#673ab7", "color": "white", "padding": "10px 18px",
+                            "border": "none", "borderRadius": "8px", "cursor": "pointer",
+                            "fontSize": "16px", "width": "140px"
+                        }
+                    ),
+                    html.Div(id=f"biosamples-submit-msg-{tab_type}", style={"marginTop": "10px"}),
+                ])
             ),
-            html.Div(id=f"biosamples-submit-msg-{tab_type}", style={"marginTop": "10px"}),
         ],
         id=f"biosamples-form-{tab_type}",
         style={"display": "none", "marginTop": "16px"},
