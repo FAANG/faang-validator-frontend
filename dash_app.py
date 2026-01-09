@@ -414,23 +414,16 @@ def _count_total_warnings(v):
 def _count_valid_invalid_for_type(validation_results_dict, sample_type):
     try:
         validation_data = validation_results_dict.get('results', {}) or {}
-        results_by_type = validation_data.get('results_by_type', {}) or {}
-        st_data = results_by_type.get(sample_type, {}) or {}
-        st_key = sample_type.replace(' ', '_')
-
-        valid_key = f"valid_{st_key}s"
-        invalid_key = f"invalid_{st_key}s"
-        if invalid_key.endswith('ss'):
-            invalid_key = invalid_key[:-1]
-
-        if isinstance(st_data, list):
-            v = sum(1 for item in st_data if not item.get('errors'))
-            iv = sum(1 for item in st_data if item.get('errors'))
-            return v, iv
-        else:
-            v = len(st_data.get(valid_key) or [])
-            iv = len(st_data.get(invalid_key) or [])
-            return v, iv
+        # Use sample_results with fallback to results_by_type for backward compatibility
+        sample_results = validation_data.get('sample_results', {}) or validation_data.get('results_by_type', {}) or {}
+        st_data = sample_results.get(sample_type, {}) or {}
+        
+        # Use summary field for counts (more reliable than counting records)
+        summary = st_data.get('summary', {}) or {}
+        valid_count = summary.get('valid', 0)
+        invalid_count = summary.get('invalid', 0)
+        
+        return int(valid_count), int(invalid_count)
 
     except Exception:
         return 0, 0
@@ -1001,9 +994,9 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
             st_data = results_by_type.get(sample_type, {}) or {}
             st_key = sample_type.replace(' ', '_')
 
+            # Note: Backend creates keys with double 's' for words ending in 's' (e.g., "specimens" -> "specimenss")
+            # So we don't remove the extra 's' - keep it as is
             invalid_key = f"invalid_{st_key}s"
-            if invalid_key.endswith('ss'):
-                invalid_key = invalid_key[:-1]
             valid_key = f"valid_{st_key}s"
 
             # Process invalid rows with errors
@@ -1244,8 +1237,9 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
     # Get sample_types_processed to filter sheets
     sample_types_processed = validation_data.get('sample_types_processed', []) or []
     
-    # Get results_by_type for summary data
-    results_by_type = validation_data.get('results_by_type', {}) or {}
+    # Get sample_results for summary data (structure: sample_results[sheet_name] = {valid_{type}s: [], invalid_{type}s: [], summary: {}})
+    # Fallback to results_by_type for backward compatibility
+    sample_results = validation_data.get('sample_results', {}) or validation_data.get('results_by_type', {}) or {}
 
     sheet_tabs = []
     sheets_with_data = []
@@ -1255,27 +1249,18 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
         if sheet_name not in sample_types_processed:
             continue
         
-        # Get summary from results_by_type for this sample type (sheet_name)
-        st_data = results_by_type.get(sheet_name, {}) or {}
-        st_key = sheet_name.replace(' ', '_')
+        # Get summary from sample_results for this sample type (sheet_name)
+        st_data = sample_results.get(sheet_name, {}) or {}
         
-        # Get valid and invalid keys
-        invalid_key = f"invalid_{st_key}s"
-        if invalid_key.endswith('ss'):
-            invalid_key = invalid_key[:-1]
-        valid_key = f"valid_{st_key}s"
-        
-        # Get counts from results_by_type summary
-        valid_records = st_data.get(valid_key, [])
-        invalid_records = st_data.get(invalid_key, [])
-        
-        valid_count = len(valid_records) if isinstance(valid_records, list) else 0
-        invalid_count = len(invalid_records) if isinstance(invalid_records, list) else 0
+        # Use summary field for counts (more reliable than counting records)
+        summary = st_data.get('summary', {}) or {}
+        valid_count = summary.get('valid', 0)
+        invalid_count = summary.get('invalid', 0)
 
         # Make sheet name title case (first letter of each word capital)
         sheet_name_title = sheet_name.title()
         
-        # Create label using results_by_type summary with inline green color for valid count
+        # Create label using sample_results summary with inline green color for valid count
         label = f"{sheet_name_title} (<span style='color: #4CAF50; font-weight: bold;'>{valid_count} valid </span>/ {invalid_count} invalid)"
 
         sheets_with_data.append(sheet_name)
@@ -1559,9 +1544,9 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
     for sample_type in sample_types:
         st_data = results_by_type.get(sample_type, {}) or {}
         st_key = sample_type.replace(' ', '_')
+        # Note: Backend creates keys with double 's' for words ending in 's' (e.g., "specimens" -> "specimenss")
+        # So we don't remove the extra 's' - keep it as is
         invalid_key = f"invalid_{st_key}s"
-        if invalid_key.endswith('ss'):
-            invalid_key = invalid_key[:-1]
         valid_key = f"valid_{st_key}s"
 
         invalid_records = st_data.get(invalid_key, [])
@@ -1961,9 +1946,9 @@ def _calculate_sheet_statistics(validation_results, all_sheets_data):
         st_data = results_by_type.get(sample_type, {}) or {}
         st_key = sample_type.replace(' ', '_')
 
+        # Note: Backend creates keys with double 's' for words ending in 's' (e.g., "specimens" -> "specimenss")
+        # So we don't remove the extra 's' - keep it as is
         invalid_key = f"invalid_{st_key}s"
-        if invalid_key.endswith('ss'):
-            invalid_key = invalid_key[:-1]
         valid_key = f"valid_{st_key}s"
 
         invalid_records = st_data.get(invalid_key, [])
