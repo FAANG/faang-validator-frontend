@@ -329,6 +329,8 @@ def register_analysis_callbacks(app):
         print(json.dumps(parsed_json))
 
         try:
+            # Load from validation_results.json file instead of API call
+            
             try:
                 response = requests.post(
                     f'{BACKEND_API_URL}/validate-data',
@@ -337,19 +339,17 @@ def register_analysis_callbacks(app):
                 )
                 if response.status_code != 200:
                     raise Exception(f"JSON endpoint returned {response.status_code}")
+                response_json = response.json()
             except Exception as json_err:
                 # Fallback: if JSON endpoint doesn't exist, send as file
                 print(f"JSON endpoint failed: {json_err}")
-            if response.status_code == 200:
-                response_json = response.json()
-            else:
-                raise Exception(f"Error {response.status_code}: {response.text}")
+                raise Exception(f"Could not load validation_results.json and API call failed: {json_err}")
 
             if isinstance(response_json, dict) and 'results' in response_json:
                 json_validation_results = response_json
                 validation_results = response_json['results']
                 analysis_summary = validation_results.get('analysis_summary', {})
-                total_summary = validation_results.get('total_summary', {})
+                total_summary = validation_results.get('analysis_summary', {})
                 # Try analysis_summary first, fallback to total_summary
                 if analysis_summary:
                     valid_count = analysis_summary.get('valid_analyses', 0)
@@ -541,12 +541,10 @@ def register_analysis_callbacks(app):
         Input("biosamples-submit-btn-ena-analysis", "n_clicks"),
         State("biosamples-username-ena-analysis", "value"),
         State("biosamples-password-ena-analysis", "value"),
-        State("biosamples-env-ena-analysis", "value"),
-        State("biosamples-action-analysis", "value"),
         State("stored-json-validation-results-analysis", "data"),
         prevent_initial_call=True,
     )
-    def _submit_to_biosamples_analysis(n, username, password, env, action, v):
+    def _submit_to_biosamples_analysis(n, username, password, v):
         """Submit to BioSamples for Analysis tab"""
         if not n:
             raise PreventUpdate
@@ -575,6 +573,10 @@ def register_analysis_callbacks(app):
 
         validation_results = v["results"]
 
+        # Default values since components are not in layout
+        env = "test"  # Default to test environment
+        action = None  # Default to not updating existing
+
         body = {
             "validation_results": validation_results,
             "webin_username": username,
@@ -584,7 +586,7 @@ def register_analysis_callbacks(app):
         }
 
         try:
-            url = f"{BACKEND_API_URL}/submit-to-biosamples"
+            url = "http://localhost:8000/submit_data_to_ena"
             r = requests.post(url, json=body, timeout=600)
 
             if not r.ok:
@@ -632,7 +634,7 @@ def register_analysis_callbacks(app):
                     if acc:
                         row[
                             "BioSample ID"
-                        ] = f"[{acc}](https://www.ebi.ac.uk/biosamples/samples/{acc})"
+                        ] = f"[{acc}](https://wwwdev.ebi.ac.uk/biosamples/samples/{acc})"
 
                 table = dash_table.DataTable(
                     data=table_data,
@@ -701,12 +703,12 @@ def register_analysis_callbacks(app):
             
             # Show all sheets in analysis_types_processed, regardless of errors/warnings
             sheets_with_data.append(sheet_name)
-            # Create label showing counts for THIS sheet
+            # Create label showing counts for THIS sheet (JavaScript will add colors)
             label = f"{sheet_name} ({valid} valid / {errors} invalid)"
 
             sheet_tabs.append(
                 dcc.Tab(
-                    label=label,
+                    label=label.capitalize(),
                     value=sheet_name,
                     id={'type': 'sheet-validation-tab-analysis', 'sheet_name': sheet_name},
                     style={
@@ -786,6 +788,107 @@ def register_analysis_callbacks(app):
 
         return html.Div([header_bar, tabs], style={"marginTop": "8px"})
 
+    # Clientside callback to style tab labels with colors
+    app.clientside_callback(
+        """
+        function(validation_results) {
+            if (!validation_results) {
+                return window.dash_clientside.no_update;
+            }
+            
+            function styleTabLabels() {
+                const tabContainer = document.getElementById('sheet-validation-tabs-analysis');
+                if (!tabContainer) {
+                    return;
+                }
+
+                let tabLabels = tabContainer.querySelectorAll('[role="tab"]');
+                
+                if (tabLabels.length === 0) {
+                    tabLabels = tabContainer.querySelectorAll('.tab, [class*="tab"], [class*="Tab"]');
+                }
+                
+                if (tabLabels.length === 0) {
+                    tabLabels = tabContainer.querySelectorAll('div[role="tab"], button[role="tab"]');
+                }
+
+                tabLabels.forEach((tab) => {
+                    if (tab.querySelector && tab.querySelector('span[style*="color"]')) {
+                        return;
+                    }
+
+                    let originalText = tab.textContent || tab.innerText || '';
+                    
+                    if (!originalText || (!originalText.includes('valid') && !originalText.includes('invalid'))) {
+                        return;
+                    }
+
+                    const match = originalText.match(/\\((\\d+)\\s+valid\\s+\\/\\s+(\\d+)\\s+invalid\\)/);
+                    if (match) {
+                        const validCount = match[1];
+                        const invalidCount = match[2];
+                        
+                        const styled = originalText.replace(
+                            /\\((\\d+)\\s+valid\\s+\\/\\s+(\\d+)\\s+invalid\\)/,
+                            '(<span style="color: #4CAF50 !important; font-weight: bold !important;">' + validCount + ' valid</span> / <span style="color: #f44336 !important; font-weight: bold !important;">' + invalidCount + ' invalid</span>)'
+                        );
+
+                        if (styled !== originalText) {
+                            try {
+                                tab.innerHTML = styled;
+                            } catch (e) {
+                                console.error('[Tab Styling Analysis] Error:', e);
+                            }
+                        }
+                    } else {
+                        let styled = originalText.replace(
+                            /(\\d+)\\s+valid/g, 
+                            '<span style="color: #4CAF50 !important; font-weight: bold !important;">$1 valid</span>'
+                        );
+                        styled = styled.replace(
+                            /(\\d+)\\s+invalid/g, 
+                            '<span style="color: #f44336 !important; font-weight: bold !important;">$1 invalid</span>'
+                        );
+
+                        if (styled !== originalText && styled.includes('<span')) {
+                            try {
+                                tab.innerHTML = styled;
+                            } catch (e) {
+                                console.error('[Tab Styling Analysis] Error (fallback):', e);
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Run with multiple delays to catch tabs that render at different times
+            setTimeout(styleTabLabels, 100);
+            setTimeout(styleTabLabels, 300);
+            setTimeout(styleTabLabels, 500);
+            setTimeout(styleTabLabels, 1000);
+            setTimeout(styleTabLabels, 2000);
+            
+            // Also set up a MutationObserver to watch for when tabs are added
+            const tabContainer = document.getElementById('sheet-validation-tabs-analysis');
+            if (tabContainer) {
+                const observer = new MutationObserver(function(mutations) {
+                    setTimeout(styleTabLabels, 50);
+                });
+                observer.observe(tabContainer, {
+                    childList: true,
+                    subtree: true,
+                    characterData: true
+                });
+            }
+            
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output('dummy-output-tab-styling-analysis', 'children'),
+        Input('stored-json-validation-results-analysis', 'data'),
+        prevent_initial_call=False
+    )
+
     # Callback to populate sheet content when tab is selected for analysis
     @app.callback(
         Output({'type': 'sheet-validation-content-analysis', 'index': MATCH}, 'children'),
@@ -803,6 +906,285 @@ def register_analysis_callbacks(app):
 
         return make_sheet_validation_panel_analysis(selected_sheet_name, validation_results, all_sheets_data)
 
+    # Download annotated template callback for Analysis tab
+    @app.callback(
+        Output('download-table-csv-analysis', 'data'),
+        Input('download-errors-btn-analysis', 'n_clicks'),
+        [State('stored-json-validation-results-analysis', 'data'),
+         State('stored-all-sheets-data-analysis', 'data'),
+         State('stored-sheet-names-analysis', 'data')],
+        prevent_initial_call=True
+    )
+    def download_annotated_xlsx_analysis(n_clicks, validation_results, all_sheets_data, sheet_names):
+        """Download annotated Excel file with Error and Warning columns for Analysis tab"""
+        if not n_clicks:
+            raise PreventUpdate
+
+        if not all_sheets_data or not sheet_names:
+            raise PreventUpdate
+
+        # Build a mapping of analysis aliases to their field-level errors/warnings
+        # Structure: {alias_normalized: {"errors": {field: [msgs]}, "warnings": {field: [msgs]}}}
+        alias_to_field_errors = {}
+
+        # Helper function to map backend field names to Excel column names
+        def _map_field_to_column_excel(field_name, columns):
+            if not field_name:
+                return None
+
+            # 1) Special case for Health Status term errors
+            if field_name.startswith("Health Status") and ".term" in field_name:
+                try:
+                    parts = field_name.split(".")
+                    idx = int(parts[1])
+                except Exception:
+                    idx = 0
+
+                def _clean_col_name(col):
+                    col_str = str(col)
+                    if '.' in col_str:
+                        return col_str.split('.')[0]
+                    return col_str
+
+                # Find all Health Status columns in order
+                health_status_cols = []
+                for i, col in enumerate(columns):
+                    col_str = str(col)
+                    if "Health Status" in col_str and "Term Source ID" not in col_str:
+                        health_status_cols.append((i, col))
+
+                # For each Health Status column, find the Term Source ID column immediately after it
+                term_cols_after_health_status = []
+                for hs_idx, hs_col in health_status_cols:
+                    next_idx = hs_idx + 1
+                    if next_idx < len(columns):
+                        next_col = columns[next_idx]
+                        cleaned_next = _clean_col_name(next_col)
+                        if cleaned_next == "Term Source ID":
+                            term_cols_after_health_status.append(next_col)
+
+                if term_cols_after_health_status:
+                    if 0 <= idx < len(term_cols_after_health_status):
+                        return term_cols_after_health_status[idx]
+                    return term_cols_after_health_status[-1] if term_cols_after_health_status else None
+
+            # 2) Try direct match (case-insensitive)
+            direct = _resolve_col(field_name, columns)
+            if direct:
+                return direct
+
+            # 2.5) Special handling for generic "Term Source ID"
+            if field_name == "Term Source ID" or field_name.lower() == "term source id":
+                for col in columns:
+                    col_str = str(col)
+                    if col_str.lower() == "term source id":
+                        return col
+                for col in columns:
+                    col_str = str(col)
+                    col_lower = col_str.lower()
+                    if col_lower.startswith("term source id."):
+                        suffix = col_lower[len("term source id."):]
+                        if suffix and suffix.isdigit():
+                            if col_str[:len("Term Source ID")].lower() == "term source id":
+                                return col
+
+            # 3) If field has dot notation, try using only the base name
+            if "." in field_name:
+                base = field_name.split(".", 1)[0]
+                base_match = _resolve_col(base, columns)
+                if base_match:
+                    return base_match
+
+            return None
+
+        if validation_results and 'results' in validation_results:
+            validation_data = validation_results['results']
+            results_by_type = validation_data.get('analysis_results', {}) or {}
+            analysis_types = validation_data.get('analysis_types_processed', []) or []
+
+            for analysis_type in analysis_types:
+                at_data = results_by_type.get(analysis_type, {}) or {}
+                
+                # Process invalid records with errors
+                invalid_records = at_data.get('invalid', [])
+                for record in invalid_records:
+                    alias = record.get("alias", "")
+                    if not alias:
+                        continue
+
+                    alias_normalized = str(alias).strip().lower()
+                    errors, warnings = get_all_errors_and_warnings(record)
+
+                    if errors or warnings:
+                        if alias_normalized not in alias_to_field_errors:
+                            alias_to_field_errors[alias_normalized] = {"errors": {}, "warnings": {}}
+                        if errors:
+                            alias_to_field_errors[alias_normalized]["errors"] = errors
+                        if warnings:
+                            alias_to_field_errors[alias_normalized]["warnings"] = warnings
+
+                # Process valid records with warnings
+                valid_records = at_data.get('valid', [])
+                for record in valid_records:
+                    alias = record.get("alias", "")
+                    if not alias:
+                        continue
+
+                    alias_normalized = str(alias).strip().lower()
+                    errors, warnings = get_all_errors_and_warnings(record)
+
+                    if errors or warnings:
+                        if alias_normalized not in alias_to_field_errors:
+                            alias_to_field_errors[alias_normalized] = {"errors": {}, "warnings": {}}
+                        if errors:
+                            # Merge errors if they exist
+                            for field, msgs in errors.items():
+                                if field in alias_to_field_errors[alias_normalized]["errors"]:
+                                    existing = alias_to_field_errors[alias_normalized]["errors"][field]
+                                    if isinstance(existing, list):
+                                        existing.extend(msgs if isinstance(msgs, list) else [msgs])
+                                    else:
+                                        alias_to_field_errors[alias_normalized]["errors"][field] = [existing] + (msgs if isinstance(msgs, list) else [msgs])
+                                else:
+                                    alias_to_field_errors[alias_normalized]["errors"][field] = msgs
+                        if warnings:
+                            # Merge warnings if they exist
+                            for field, msgs in warnings.items():
+                                if field in alias_to_field_errors[alias_normalized]["warnings"]:
+                                    existing = alias_to_field_errors[alias_normalized]["warnings"][field]
+                                    if isinstance(existing, list):
+                                        existing.extend(msgs if isinstance(msgs, list) else [msgs])
+                                    else:
+                                        alias_to_field_errors[alias_normalized]["warnings"][field] = [existing] + (msgs if isinstance(msgs, list) else [msgs])
+                                else:
+                                    alias_to_field_errors[alias_normalized]["warnings"][field] = msgs
+
+        buffer = io.BytesIO()
+
+        with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+            for sheet_name in sheet_names:
+                if sheet_name not in all_sheets_data:
+                    continue
+
+                # Get original sheet data
+                sheet_records = all_sheets_data[sheet_name]
+                if not sheet_records:
+                    continue
+
+                # Convert to DataFrame
+                df = pd.DataFrame(sheet_records)
+
+                # Map field errors/warnings to columns for highlighting
+                row_to_field_errors = {}  # {row_index: {"errors": {col_idx: msgs}, "warnings": {col_idx: msgs}}}
+                cols_original = list(df.columns)  # Original columns
+
+                for row_idx, record in enumerate(sheet_records):
+                    # Try to find alias in various possible column names
+                    alias = None
+                    for key in ["Alias", "alias", "Analysis Alias", "analysis_alias"]:
+                        if key in record:
+                            alias = str(record.get(key, ""))
+                            break
+
+                    if not alias:
+                        alias = str(list(record.values())[0]) if record else ""
+
+                    # Normalize alias for matching
+                    alias_normalized = alias.strip().lower() if alias else ""
+
+                    # Get field-level errors/warnings for this alias
+                    field_data = alias_to_field_errors.get(alias_normalized, {})
+                    field_errors = field_data.get("errors", {})
+                    field_warnings = field_data.get("warnings", {})
+
+                    # Map field errors/warnings to column indices for highlighting
+                    if field_errors or field_warnings:
+                        row_to_field_errors[row_idx] = {"errors": {}, "warnings": {}}
+
+                        # Map error fields to columns
+                        for field, msgs in field_errors.items():
+                            col = _map_field_to_column_excel(field, cols_original)
+                            if col and col in cols_original:
+                                col_idx = cols_original.index(col)
+                                # Store both messages and field name for tooltip
+                                row_to_field_errors[row_idx]["errors"][col_idx] = {
+                                    "field": field,
+                                    "messages": msgs
+                                }
+
+                        # Map warning fields to columns
+                        for field, msgs in field_warnings.items():
+                            col = _map_field_to_column_excel(field, cols_original)
+                            if col and col in cols_original:
+                                col_idx = cols_original.index(col)
+                                # Store both messages and field name for tooltip
+                                row_to_field_errors[row_idx]["warnings"][col_idx] = {
+                                    "field": field,
+                                    "messages": msgs
+                                }
+
+                # Write to Excel
+                sheet_name_clean = sheet_name[:31]  # Excel sheet name limit
+                df.to_excel(writer, sheet_name=sheet_name_clean, index=False)
+
+                # Get Excel formatting objects
+                book = writer.book
+                fmt_red = book.add_format({"bg_color": "#FFCCCC"})
+                fmt_yellow = book.add_format({"bg_color": "#FFF4CC"})
+
+                ws = writer.sheets[sheet_name_clean]
+                cols = list(df.columns)  # Original columns only
+
+                # Helper function to format messages for tooltip
+                def format_tooltip_message(field_name, msgs, is_warning=False):
+                    """Format error/warning messages for Excel comment/tooltip."""
+                    msgs_list = msgs if isinstance(msgs, list) else [msgs]
+                    prefix = "Warning" if is_warning else "Error"
+                    # Join messages with line breaks for better readability
+                    formatted = f"{prefix} - {field_name}:\n"
+                    formatted += "\n".join([f"• {str(msg)}" for msg in msgs_list])
+                    # Excel comments have a limit, so truncate if too long
+                    max_length = 2000
+                    if len(formatted) > max_length:
+                        formatted = formatted[:max_length] + "..."
+                    return formatted
+
+                # Highlight specific cells with errors/warnings and add tooltips
+                for row_idx, record in enumerate(sheet_records):
+                    excel_row = row_idx + 1  # Excel is 1-indexed
+
+                    if row_idx in row_to_field_errors:
+                        field_data = row_to_field_errors[row_idx]
+
+                        # Highlight error cells (red) - use original column indices
+                        for col_idx, error_data in field_data.get("errors", {}).items():
+                            if col_idx < len(cols_original):
+                                cell_value = df.iat[row_idx, col_idx] if row_idx < len(df) else ""
+                                ws.write(excel_row, col_idx, cell_value, fmt_red)
+                                # Add tooltip/comment with error message
+                                field_name = error_data.get("field",
+                                                            cols_original[col_idx] if col_idx < len(cols_original) else "")
+                                msgs = error_data.get("messages", [])
+                                tooltip_text = format_tooltip_message(field_name, msgs, is_warning=False)
+                                ws.write_comment(excel_row, col_idx, tooltip_text,
+                                                 {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
+
+                        # Highlight warning cells (yellow) - use original column indices
+                        for col_idx, warning_data in field_data.get("warnings", {}).items():
+                            if col_idx < len(cols_original):
+                                cell_value = df.iat[row_idx, col_idx] if row_idx < len(df) else ""
+                                ws.write(excel_row, col_idx, cell_value, fmt_yellow)
+                                # Add tooltip/comment with warning message
+                                field_name = warning_data.get("field", cols_original[col_idx] if col_idx < len(
+                                    cols_original) else "")
+                                msgs = warning_data.get("messages", [])
+                                tooltip_text = format_tooltip_message(field_name, msgs, is_warning=True)
+                                ws.write_comment(excel_row, col_idx, tooltip_text,
+                                                 {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
+
+        buffer.seek(0)
+        return dcc.send_bytes(buffer.getvalue(), "annotated_template_analysis.xlsx")
+
 
 def make_sheet_validation_panel_analysis(sheet_name: str, validation_results: dict, all_sheets_data: dict):
     """Create a panel showing validation results for analysis sheet"""
@@ -816,20 +1198,19 @@ def make_sheet_validation_panel_analysis(sheet_name: str, validation_results: di
 
     # Get validation data - use analysis_types_processed for analysis
     validation_data = validation_results.get('results', {})
-    results_by_type = validation_data.get('results_by_type', {}) or {}
+    results_by_type = validation_data.get('analysis_results', {}) or {}
     analysis_summary = validation_data.get('analysis_summary', {})
     analysis_types = validation_data.get('analysis_types_processed', []) or []
 
     # Get all validation rows for this sheet
-    # For analysis, try "Analysis Alias" first, then "Sample Name"
+    # For analysis, try "Analysis Alias"
     sheet_sample_names = set()
     for record in sheet_records:
-        analysis_alias = str(record.get("Analysis Alias", ""))
-        sample_name = str(record.get("Sample Name", ""))
+        analysis_alias = str(record.get("Alias", "")).strip()
+
         if analysis_alias:
             sheet_sample_names.add(analysis_alias)
-        if sample_name:
-            sheet_sample_names.add(sample_name)
+
 
     # Collect all rows that belong to this sheet
     error_map = {}
@@ -838,27 +1219,86 @@ def make_sheet_validation_panel_analysis(sheet_name: str, validation_results: di
     for analysis_type in analysis_types:
         at_data = results_by_type.get(analysis_type, {}) or {}
         at_key = analysis_type.replace(' ', '_')
-        invalid_key = f"invalid_{at_key}s"
+        invalid_key = "invalid"
         if invalid_key.endswith('ss'):
             invalid_key = invalid_key[:-1]
-        valid_key = f"valid_{at_key}s"
+        valid_key = "valid"
 
         invalid_records = at_data.get(invalid_key, [])
         valid_records = at_data.get(valid_key, [])
 
         for record in invalid_records + valid_records:
-            sample_name = record.get("sample_name", "") or record.get("analysis_alias", "")
-            if sample_name in sheet_sample_names:
-                errors, warnings = get_all_errors_and_warnings(record)
-                if errors:
-                    error_map[sample_name] = errors
-                if warnings:
-                    warning_map[sample_name] = warnings
+            # Get alias from validation record (lowercase "alias" in API response)
+            val_analysis_alias = str(record.get("alias", "")).strip()
+            
+            # Only process if this alias matches one in our sheet (case-insensitive match)
+            if not val_analysis_alias:
+                continue
+            
+            # Case-insensitive matching
+            matched_alias = None
+            for sheet_alias in sheet_sample_names:
+                if str(sheet_alias).strip().lower() == val_analysis_alias.lower():
+                    matched_alias = sheet_alias
+                    break
+            
+            if not matched_alias:
+                continue
+            
+            # Extract errors and warnings from the record
+            errors, warnings = get_all_errors_and_warnings(record)
+            
+            # Store errors if any exist (use matched_alias for consistency)
+            if errors:
+                if matched_alias in error_map:
+                    # Merge errors if alias already exists
+                    for field, msgs in errors.items():
+                        if field in error_map[matched_alias]:
+                            if isinstance(error_map[matched_alias][field], list):
+                                error_map[matched_alias][field].extend(msgs if isinstance(msgs, list) else [msgs])
+                            else:
+                                error_map[matched_alias][field] = [error_map[matched_alias][field]] + (msgs if isinstance(msgs, list) else [msgs])
+                        else:
+                            error_map[matched_alias][field] = msgs
+                else:
+                    error_map[matched_alias] = errors
+            
+            # Store warnings if any exist (merge even if errors exist)
+            if warnings:
+                if matched_alias in warning_map:
+                    # Merge warnings if alias already exists
+                    for field, msgs in warnings.items():
+                        if field in warning_map[matched_alias]:
+                            if isinstance(warning_map[matched_alias][field], list):
+                                warning_map[matched_alias][field].extend(msgs if isinstance(msgs, list) else [msgs])
+                            else:
+                                warning_map[matched_alias][field] = [warning_map[matched_alias][field]] + (msgs if isinstance(msgs, list) else [msgs])
+                        else:
+                            warning_map[matched_alias][field] = msgs
+                else:
+                    warning_map[matched_alias] = warnings
 
     # Create DataFrame from sheet records
     df_all = pd.DataFrame(sheet_records)
     if df_all.empty:
         return html.Div([html.H4("No data available", style={'textAlign': 'center', 'margin': '10px 0'})])
+    
+    # Debug: Print error_map and warning_map to help diagnose issues
+    print(f"DEBUG Analysis Tab: error_map keys: {list(error_map.keys())}")
+    print(f"DEBUG Analysis Tab: warning_map keys: {list(warning_map.keys())}")
+    print(f"DEBUG Analysis Tab: sheet_sample_names: {list(sheet_sample_names)[:5]}...")  # Show first 5
+    if 'Alias' in df_all.columns:
+        print(f"DEBUG Analysis Tab: DataFrame 'Alias' sample values: {df_all['Alias'].head().tolist()}")
+    else:
+        print(f"DEBUG Analysis Tab: Available columns: {list(df_all.columns)}")
+    
+    # Debug: Show what records we're processing
+    print(f"DEBUG Analysis Tab: Processing {len(analysis_types)} analysis types: {analysis_types}")
+    for analysis_type in analysis_types:
+        at_data = results_by_type.get(analysis_type, {}) or {}
+        invalid_records = at_data.get('invalid', [])
+        valid_records = at_data.get('valid', [])
+        print(f"DEBUG Analysis Tab: {analysis_type} - {len(valid_records)} valid, {len(invalid_records)} invalid records")
 
     # Use the same styling logic
     def _as_list(msgs):
@@ -927,31 +1367,56 @@ def make_sheet_validation_panel_analysis(sheet_name: str, validation_results: di
     tooltip_data = []
 
     for i, row in df_all.iterrows():
-        # Try to match by Analysis Alias or Sample Name
-        analysis_alias = str(row.get("Analysis Alias", ""))
-        sample_name = str(row.get("Sample Name", ""))
-        match_key = analysis_alias if analysis_alias else sample_name
+        # Try to match by Alias - check multiple possible column name variations
+        analysis_alias = None
+        for col_name in ["Alias", "alias", "Analysis Alias", "analysis_alias"]:
+            if col_name in row and str(row.get(col_name, "")).strip():
+                analysis_alias = str(row.get(col_name, "")).strip()
+                break
         
         tips = {}
         row_styles = []
+        cells_with_errors = set()  # Track cells that have errors (to prioritize over warnings)
 
-        if match_key in error_map:
-            field_errors = error_map[match_key] or {}
+        # Check analysis_alias in error_map (case-insensitive matching)
+        field_errors = {}
+        if analysis_alias:
+            # Try exact match first
+            if analysis_alias in error_map:
+                field_errors = error_map[analysis_alias] or {}
+            else:
+                # Try case-insensitive match
+                for key in error_map.keys():
+                    if str(key).strip().lower() == str(analysis_alias).strip().lower():
+                        field_errors = error_map[key] or {}
+                        break
+        
+        if field_errors:
             for field, msgs in field_errors.items():
                 col = _map_field_to_column(field, df_all.columns)
                 if not col:
                     col = field
 
                 col_id = None
+                # First try exact match
                 if col in df_all.columns:
                     col_id = col
                 else:
+                    # Try case-insensitive match
                     col_str = str(col)
                     for df_col in df_all.columns:
-                        if str(df_col) == col_str:
+                        if str(df_col).lower() == col_str.lower():
                             col_id = df_col
                             break
+                    # If still not found, try partial match
+                    if not col_id:
+                        for df_col in df_all.columns:
+                            if col_str.lower() in str(df_col).lower() or str(df_col).lower() in col_str.lower():
+                                col_id = df_col
+                                break
                 if not col_id:
+                    # Skip if we can't find the column, but log for debugging
+                    print(f"Warning: Could not find column '{col}' (from field '{field}') in DataFrame columns: {list(df_all.columns)}")
                     continue
 
                 msgs_list = _as_list(msgs)
@@ -969,27 +1434,53 @@ def make_sheet_validation_panel_analysis(sheet_name: str, validation_results: di
                     row_styles.append({'if': {'row_index': i, 'column_id': col_id}, 'backgroundColor': '#fff4cc'})
                     tips[col_id] = {'value': combined, 'type': 'markdown'}
                 else:
+                    # Mark this cell as having an error
+                    cells_with_errors.add(col_id)
                     row_styles.append({'if': {'row_index': i, 'column_id': col_id}, 'backgroundColor': '#ffcccc'})
                     tips[col_id] = {'value': combined, 'type': 'markdown'}
 
-        if match_key in warning_map:
-            field_warnings = warning_map[match_key] or {}
+        # Check analysis_alias in warning_map (case-insensitive matching)
+        field_warnings = {}
+        if analysis_alias:
+            # Try exact match first
+            if analysis_alias in warning_map:
+                field_warnings = warning_map[analysis_alias] or {}
+            else:
+                # Try case-insensitive match
+                for key in warning_map.keys():
+                    if str(key).strip().lower() == str(analysis_alias).strip().lower():
+                        field_warnings = warning_map[key] or {}
+                        break
+        
+        if field_warnings:
             for field, msgs in field_warnings.items():
                 col = _map_field_to_column(field, df_all.columns)
                 if not col:
                     col = field
 
                 col_id = None
+                # First try exact match
                 if col in df_all.columns:
                     col_id = col
                 else:
+                    # Try case-insensitive match
                     col_str = str(col)
                     for df_col in df_all.columns:
-                        if str(df_col) == col_str:
+                        if str(df_col).lower() == col_str.lower():
                             col_id = df_col
                             break
+                    # If still not found, try partial match
+                    if not col_id:
+                        for df_col in df_all.columns:
+                            if col_str.lower() in str(df_col).lower() or str(df_col).lower() in col_str.lower():
+                                col_id = df_col
+                                break
                 if not col_id:
+                    # Skip if we can't find the column, but log for debugging
+                    print(f"Warning: Could not find column '{col}' (from field '{field}') in DataFrame columns: {list(df_all.columns)}")
                     continue
+                
+                # Only apply warning style if this cell doesn't already have an error
                 msgs_list = _as_list(msgs)
                 warn_text = "**Warning**: " + (field if field else 'General') + " — " + " | ".join(msgs_list)
                 if col_id in tips:
@@ -998,10 +1489,18 @@ def make_sheet_validation_panel_analysis(sheet_name: str, validation_results: di
                 else:
                     combined = warn_text
                 tips[col_id] = {'value': combined, 'type': 'markdown'}
-                row_styles.append({'if': {'row_index': i, 'column_id': col_id}, 'backgroundColor': '#fff4cc'})
+                
+                # Only add warning background if cell doesn't have an error
+                if col_id not in cells_with_errors:
+                    row_styles.append({'if': {'row_index': i, 'column_id': col_id}, 'backgroundColor': '#fff4cc'})
 
         cell_styles.extend(row_styles)
         tooltip_data.append(tips)
+
+    # Ensure tooltip_data has the same length as the number of rows
+    while len(tooltip_data) < len(df_all):
+        tooltip_data.append({})
+    tooltip_data = tooltip_data[:len(df_all)]
 
     def clean_header_name(header):
         if '.' in header:
@@ -1149,7 +1648,7 @@ def _calculate_sheet_statistics_analysis(validation_results, all_sheets_data):
         return sheet_stats
 
     validation_data = validation_results['results']
-    results_by_type = validation_data.get('results_by_type', {}) or {}
+    results_by_type = validation_data.get('analysis_results', {}) or {}
     analysis_types = validation_data.get('analysis_types_processed', []) or []
 
     # Initialize sheet stats
@@ -1168,38 +1667,33 @@ def _calculate_sheet_statistics_analysis(validation_results, all_sheets_data):
         at_data = results_by_type.get(analysis_type, {}) or {}
         at_key = analysis_type.replace(' ', '_')
 
-        invalid_key = f"invalid_{at_key}s"
-        if invalid_key.endswith('ss'):
-            invalid_key = invalid_key[:-1]
-        valid_key = f"valid_{at_key}s"
 
-        invalid_records = at_data.get(invalid_key, [])
-        valid_records = at_data.get(valid_key, [])
+        invalid_records = at_data.get('invalid', [])
+        valid_records = at_data.get('valid', [])
 
         all_records = invalid_records + valid_records
 
         for record in all_records:
-            sample_name = record.get("sample_name", "") or record.get("analysis_alias", "")
-            if not sample_name:
+            alias = record.get("alias", "")
+            if not alias:
                 continue
 
             errors, warnings = get_all_errors_and_warnings(record)
 
             # Find which sheet contains this sample
-            # For analysis, try "Analysis Alias" first, then "Sample Name"
+            # For analysis, try "Analysis Alias"
             for sheet_name, sheet_records in (all_sheets_data or {}).items():
                 if not sheet_records:
                     continue
                 sheet_sample_names = set()
                 for r in sheet_records:
-                    analysis_alias = str(r.get("Analysis Alias", ""))
-                    samp_name = str(r.get("Sample Name", ""))
+                    analysis_alias = str(r.get("Alias", ""))
+
                     if analysis_alias:
                         sheet_sample_names.add(analysis_alias)
-                    if samp_name:
-                        sheet_sample_names.add(samp_name)
+
                 
-                if sample_name in sheet_sample_names:
+                if alias in sheet_sample_names:
                     if sheet_name not in sheet_stats:
                         sheet_stats[sheet_name] = {
                             'total_records': len(sheet_records),
@@ -1209,16 +1703,16 @@ def _calculate_sheet_statistics_analysis(validation_results, all_sheets_data):
                             'sample_status': {}
                         }
 
-                    if sample_name not in sheet_stats[sheet_name]['sample_status']:
+                    if alias not in sheet_stats[sheet_name]['sample_status']:
                         if errors:
                             sheet_stats[sheet_name]['error_records'] += 1
-                            sheet_stats[sheet_name]['sample_status'][sample_name] = 'error'
+                            sheet_stats[sheet_name]['sample_status'][alias] = 'error'
                         elif warnings:
                             sheet_stats[sheet_name]['warning_records'] += 1
-                            sheet_stats[sheet_name]['sample_status'][sample_name] = 'warning'
+                            sheet_stats[sheet_name]['sample_status'][alias] = 'warning'
                         else:
                             sheet_stats[sheet_name]['valid_records'] += 1
-                            sheet_stats[sheet_name]['sample_status'][sample_name] = 'valid'
+                            sheet_stats[sheet_name]['sample_status'][alias] = 'valid'
                     break
 
     # Correct valid counts
