@@ -240,9 +240,9 @@ def get_all_errors_and_warnings(record):
                 elif 'Derived From' in data and data.get('Derived From'):
                     field_to_blame = 'Derived From'
 
-                if field_to_blame not in errors:
-                    errors[field_to_blame] = []
-                errors[field_to_blame].append(message)
+                if field_to_blame not in warnings:
+                    warnings[field_to_blame] = []
+                warnings[field_to_blame].append(message)
 
     # From 'field_warnings'
     if 'field_warnings' in record and record['field_warnings']:
@@ -264,7 +264,7 @@ def get_all_errors_and_warnings(record):
                     warnings['general'] = []
                 warnings['general'].append(message)
 
-    # From 'relationship_errors'
+    # From 'relationship_errors' (top level - treat as warnings, yellow highlighting)
     if 'relationship_errors' in record and record['relationship_errors']:
         # Try to associate with 'Child Of' or 'Derived From'
         field_to_blame = 'general'
@@ -357,7 +357,7 @@ def _collect_valid_records(v):
     out = []
     try:
         res = v.get("results", {}) or {}
-        by_type = res.get("results_by_type", {}) or {}
+        by_type = res.get("sample_results", {}) or {}
         for sample_type, st_data in by_type.items():
             st_key = sample_type.replace(" ", "_")
             valid_key = f"valid_{st_key}s"
@@ -398,7 +398,7 @@ def _count_total_warnings(v):
     """Count total number of records with warnings across all sample types."""
     try:
         validation_data = v.get("results", {}) or {}
-        results_by_type = validation_data.get("results_by_type", {}) or {}
+        results_by_type = validation_data.get("sample_results", {}) or {}
         sample_types = validation_data.get("sample_types_processed", []) or []
 
         total_warnings = 0
@@ -414,8 +414,8 @@ def _count_total_warnings(v):
 def _count_valid_invalid_for_type(validation_results_dict, sample_type):
     try:
         validation_data = validation_results_dict.get('results', {}) or {}
-        # Use sample_results with fallback to results_by_type for backward compatibility
-        sample_results = validation_data.get('sample_results', {}) or validation_data.get('results_by_type', {}) or {}
+
+        sample_results = validation_data.get('sample_results', {}) or {}
         st_data = sample_results.get(sample_type, {}) or {}
         
         # Use summary field for counts (more reliable than counting records)
@@ -433,7 +433,7 @@ def _count_warnings_for_type(validation_results_dict, sample_type):
     """Count the number of valid records with warnings for a sample type."""
     try:
         validation_data = validation_results_dict.get('results', {}) or {}
-        results_by_type = validation_data.get('results_by_type', {}) or {}
+        results_by_type = validation_data.get('sample_results', {}) or {}
         st_data = results_by_type.get(sample_type, {}) or {}
         st_key = sample_type.replace(' ', '_')
 
@@ -764,7 +764,7 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
 
     all_sheets_validation_data = {}
     json_validation_results = None
-    print(json.dumps(parsed_json))
+
     print("file uploaded!!")
     try:
         try:
@@ -918,11 +918,11 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
     sample_to_field_errors = {}
 
     # Helper function to map backend field names to Excel column names
+    # Use the same mapping function as validation results table
     def _map_field_to_column_excel(field_name, columns):
+        # Same mapping logic as _map_field_to_column in validation results
         if not field_name:
             return None
-
-        # 1) Special case for Health Status term errors
         if field_name.startswith("Health Status") and ".term" in field_name:
             try:
                 parts = field_name.split(".")
@@ -936,14 +936,11 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                     return col_str.split('.')[0]
                 return col_str
 
-            # Find all Health Status columns in order
             health_status_cols = []
             for i, col in enumerate(columns):
                 col_str = str(col)
                 if "Health Status" in col_str and "Term Source ID" not in col_str:
                     health_status_cols.append((i, col))
-
-            # For each Health Status column, find the Term Source ID column immediately after it
             term_cols_after_health_status = []
             for hs_idx, hs_col in health_status_cols:
                 next_idx = hs_idx + 1
@@ -952,18 +949,39 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                     cleaned_next = _clean_col_name(next_col)
                     if cleaned_next == "Term Source ID":
                         term_cols_after_health_status.append(next_col)
-
             if term_cols_after_health_status:
                 if 0 <= idx < len(term_cols_after_health_status):
                     return term_cols_after_health_status[idx]
                 return term_cols_after_health_status[-1] if term_cols_after_health_status else None
 
-        # 2) Try direct match (case-insensitive)
+        # Special case for Breed Term Source ID - find Term Source ID column after Breed
+        if "Breed" in field_name and "Term Source ID" in field_name:
+            def _clean_col_name(col):
+                col_str = str(col)
+                if '.' in col_str:
+                    return col_str.split('.')[0]
+                return col_str
+
+            # Find Breed column
+            breed_col_idx = None
+            for i, col in enumerate(columns):
+                col_str = str(col)
+                if "Breed" in col_str and "Term Source ID" not in col_str:
+                    breed_col_idx = i
+                    break
+
+            # If Breed column found, find Term Source ID column immediately after it
+            if breed_col_idx is not None:
+                next_idx = breed_col_idx + 1
+                if next_idx < len(columns):
+                    next_col = columns[next_idx]
+                    cleaned_next = _clean_col_name(next_col)
+                    if cleaned_next == "Term Source ID":
+                        return next_col
+
         direct = _resolve_col(field_name, columns)
         if direct:
             return direct
-
-        # 2.5) Special handling for generic "Term Source ID"
         if field_name == "Term Source ID" or field_name.lower() == "term source id":
             for col in columns:
                 col_str = str(col)
@@ -977,19 +995,16 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                     if suffix and suffix.isdigit():
                         if col_str[:len("Term Source ID")].lower() == "term source id":
                             return col
-
-        # 3) If field has dot notation, try using only the base name
         if "." in field_name:
             base = field_name.split(".", 1)[0]
             base_match = _resolve_col(base, columns)
             if base_match:
                 return base_match
-
         return None
 
     if validation_results and 'results' in validation_results:
         validation_data = validation_results['results']
-        results_by_type = validation_data.get('results_by_type', {}) or {}
+        results_by_type = validation_data.get('sample_results', {}) or {}
         sample_types = validation_data.get('sample_types_processed', []) or []
 
         for sample_type in sample_types:
@@ -1051,10 +1066,9 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
             # Convert to DataFrame
             df = pd.DataFrame(sheet_records)
 
-            # Build Error column and map field errors/warnings to columns
-            error_column = []
+            # Map field errors/warnings to columns for highlighting
             row_to_field_errors = {}  # {row_index: {"errors": {col_idx: msgs}, "warnings": {col_idx: msgs}}}
-            cols_original = list(df.columns)  # Original columns before adding Error column
+            cols_original = list(df.columns)
 
             for row_idx, record in enumerate(sheet_records):
                 # Try to find sample name in various possible column names
@@ -1075,60 +1089,75 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                 field_errors = field_data.get("errors", {})
                 field_warnings = field_data.get("warnings", {})
 
-                # Aggregate error messages for Error column
-                all_error_messages = []
-                for field, msgs in field_errors.items():
-                    msgs_list = msgs if isinstance(msgs, list) else [msgs]
-                    for msg in msgs_list:
-                        all_error_messages.append(f"{field}: {msg}")
-                for field, msgs in field_warnings.items():
-                    msgs_list = msgs if isinstance(msgs, list) else [msgs]
-                    for msg in msgs_list:
-                        all_error_messages.append(f"Warning: {field}: {msg}")
-
-                error_column.append(" | ".join(all_error_messages) if all_error_messages else "")
-
                 # Map field errors/warnings to column indices for highlighting
                 if field_errors or field_warnings:
                     row_to_field_errors[row_idx] = {"errors": {}, "warnings": {}}
 
-                    # Map error fields to columns (use original columns before adding Error column)
+                    # Map error fields to columns (same logic as validation results table)
                     for field, msgs in field_errors.items():
                         col = _map_field_to_column_excel(field, cols_original)
-                        if col and col in cols_original:
-                            col_idx = cols_original.index(col)
-                            # Store both messages and field name for tooltip
-                            row_to_field_errors[row_idx]["errors"][col_idx] = {
-                                "field": field,
-                                "messages": msgs
-                            }
+                        if col:
+                            # Try to find column by exact match first
+                            if col in cols_original:
+                                col_idx = cols_original.index(col)
+                            else:
+                                # Try case-insensitive match
+                                col_idx = None
+                                for i, c in enumerate(cols_original):
+                                    if str(c).lower() == str(col).lower():
+                                        col_idx = i
+                                        break
+                            
+                            if col_idx is not None:
+                                # Store both messages and field name for tooltip
+                                row_to_field_errors[row_idx]["errors"][col_idx] = {
+                                    "field": field,
+                                    "messages": msgs
+                                }
 
-                    # Map warning fields to columns
+                    # Map warning fields to columns (same logic as validation results table)
                     for field, msgs in field_warnings.items():
                         col = _map_field_to_column_excel(field, cols_original)
-                        if col and col in cols_original:
-                            col_idx = cols_original.index(col)
-                            # Store both messages and field name for tooltip
-                            row_to_field_errors[row_idx]["warnings"][col_idx] = {
-                                "field": field,
-                                "messages": msgs
-                            }
+                        if col:
+                            # Try to find column by exact match first
+                            if col in cols_original:
+                                col_idx = cols_original.index(col)
+                            else:
+                                # Try case-insensitive match
+                                col_idx = None
+                                for i, c in enumerate(cols_original):
+                                    if str(c).lower() == str(col).lower():
+                                        col_idx = i
+                                        break
+                            
+                            if col_idx is not None:
+                                # Store both messages and field name for tooltip
+                                row_to_field_errors[row_idx]["warnings"][col_idx] = {
+                                    "field": field,
+                                    "messages": msgs
+                                }
 
-            # Add Error column to DataFrame
-            df["Error"] = error_column
-
-            # Write to Excel
+            # Clean headers to match validation results table display
+            def clean_header_name(header):
+                if '.' in header:
+                    return header.split('.')[0]
+                return header
+            
+            # Create a copy of the DataFrame with cleaned headers
+            df_cleaned = df.copy()
+            df_cleaned.columns = [clean_header_name(col) for col in df.columns]
+            
+            # Write to Excel with cleaned headers
             sheet_name_clean = sheet_name[:31]  # Excel sheet name limit
-            df.to_excel(writer, sheet_name=sheet_name_clean, index=False)
+            df_cleaned.to_excel(writer, sheet_name=sheet_name_clean, index=False)
 
-            # Get Excel formatting objects
+            # Get Excel formatting objects - matching validation table colors
             book = writer.book
-            fmt_red = book.add_format({"bg_color": "#FFCCCC"})
-            fmt_yellow = book.add_format({"bg_color": "#FFF4CC"})
+            fmt_red = book.add_format({"bg_color": "#FFCCCC"})  # Matches #ffcccc from validation table
+            fmt_yellow = book.add_format({"bg_color": "#FFF4CC"})  # Matches #fff4cc from validation table
 
             ws = writer.sheets[sheet_name_clean]
-            cols = list(df.columns)  # Now includes Error column
-            error_col_idx = cols.index("Error")
+            cols = list(df_cleaned.columns)  # Use cleaned column names
 
             # Helper function to format messages for tooltip
             def format_tooltip_message(field_name, msgs, is_warning=False):
@@ -1145,77 +1174,88 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                 return formatted
 
             # Highlight specific cells with errors/warnings and add tooltips
+            # Errors take precedence over warnings (red highlighting if both exist)
             for row_idx, record in enumerate(sheet_records):
-                excel_row = row_idx + 1  # Excel is 1-indexed
+                excel_row = row_idx + 1  # Excel is 1-indexed (header is row 0, data starts at row 1)
 
                 if row_idx in row_to_field_errors:
                     field_data = row_to_field_errors[row_idx]
+                    
+                    # Get all columns that have errors or warnings
+                    all_affected_cols = set()
+                    all_affected_cols.update(field_data.get("errors", {}).keys())
+                    all_affected_cols.update(field_data.get("warnings", {}).keys())
 
-                    # Highlight error cells (red) - use original column indices
-                    for col_idx, error_data in field_data.get("errors", {}).items():
-                        if col_idx < len(cols):
-                            cell_value = df.iat[row_idx, col_idx] if row_idx < len(df) else ""
-                            ws.write(excel_row, col_idx, cell_value, fmt_red)
-                            # Add tooltip/comment with error message
-                            field_name = error_data.get("field",
-                                                        cols_original[col_idx] if col_idx < len(cols_original) else "")
-                            msgs = error_data.get("messages", [])
-                            tooltip_text = format_tooltip_message(field_name, msgs, is_warning=False)
-                            ws.write_comment(excel_row, col_idx, tooltip_text,
-                                             {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
-
-                    # Highlight warning cells (yellow) - use original column indices
-                    for col_idx, warning_data in field_data.get("warnings", {}).items():
-                        if col_idx < len(cols):
-                            cell_value = df.iat[row_idx, col_idx] if row_idx < len(df) else ""
-                            ws.write(excel_row, col_idx, cell_value, fmt_yellow)
-                            # Add tooltip/comment with warning message
-                            field_name = warning_data.get("field", cols_original[col_idx] if col_idx < len(
-                                cols_original) else "")
-                            msgs = warning_data.get("messages", [])
-                            tooltip_text = format_tooltip_message(field_name, msgs, is_warning=True)
-                            ws.write_comment(excel_row, col_idx, tooltip_text,
-                                             {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
-
-                # Format Error column cell and add tooltip
-                error_text = error_column[row_idx] if row_idx < len(error_column) else ""
-                if error_text:
-                    # Check if this row has any errors (not just warnings)
-                    has_errors = row_idx in row_to_field_errors and row_to_field_errors[row_idx].get("errors", {})
-                    fmt = fmt_yellow if not has_errors else fmt_red
-                    ws.write(excel_row, error_col_idx, error_text, fmt)
-                    # Add tooltip/comment to Error column with all messages
-                    # Format the tooltip nicely
-                    tooltip_parts = []
-                    if row_idx in row_to_field_errors:
-                        field_data = row_to_field_errors[row_idx]
-                        # Add error messages
-                        for col_idx, error_data in field_data.get("errors", {}).items():
+                    for col_idx in all_affected_cols:
+                        if col_idx >= len(cols) or col_idx < 0:
+                            continue
+                        
+                        # Get cell value from the cleaned DataFrame
+                        try:
+                            if row_idx < len(df_cleaned) and col_idx < len(df_cleaned.columns):
+                                cell_value = df_cleaned.iloc[row_idx, col_idx]
+                                # Handle NaN values
+                                if pd.isna(cell_value):
+                                    cell_value = ""
+                            else:
+                                cell_value = ""
+                        except Exception:
+                            cell_value = ""
+                        
+                        # Check if this cell has errors (errors take precedence)
+                        has_errors = col_idx in field_data.get("errors", {})
+                        has_warnings = col_idx in field_data.get("warnings", {})
+                        
+                        if not (has_errors or has_warnings):
+                            continue
+                        
+                        # Combine tooltip messages from both errors and warnings
+                        tooltip_parts = []
+                        
+                        if has_errors:
+                            error_data = field_data["errors"][col_idx]
                             field_name = error_data.get("field",
                                                         cols_original[col_idx] if col_idx < len(cols_original) else "")
                             msgs = error_data.get("messages", [])
                             msgs_list = msgs if isinstance(msgs, list) else [msgs]
                             for msg in msgs_list:
                                 tooltip_parts.append(f"Error - {field_name}: {msg}")
-                        # Add warning messages
-                        for col_idx, warning_data in field_data.get("warnings", {}).items():
-                            field_name = warning_data.get("field", cols_original[col_idx] if col_idx < len(
-                                cols_original) else "")
+                            # Highlight in red (errors take precedence) - overwrite cell with formatting
+                            ws.write(excel_row, col_idx, cell_value, fmt_red)
+                        elif has_warnings:
+                            warning_data = field_data["warnings"][col_idx]
+                            field_name = warning_data.get("field",
+                                                          cols_original[col_idx] if col_idx < len(cols_original) else "")
                             msgs = warning_data.get("messages", [])
                             msgs_list = msgs if isinstance(msgs, list) else [msgs]
                             for msg in msgs_list:
                                 tooltip_parts.append(f"Warning - {field_name}: {msg}")
-
-                    if tooltip_parts:
-                        tooltip_text = "\n".join([f"• {part}" for part in tooltip_parts])
-                        # Truncate if too long
-                        max_length = 2000
-                        if len(tooltip_text) > max_length:
-                            tooltip_text = tooltip_text[:max_length] + "..."
-                        ws.write_comment(excel_row, error_col_idx, tooltip_text,
-                                         {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
-                else:
-                    ws.write(excel_row, error_col_idx, "")
+                            # Highlight in yellow (only warnings, no errors) - overwrite cell with formatting
+                            ws.write(excel_row, col_idx, cell_value, fmt_yellow)
+                        
+                        # Add warnings to tooltip even if cell is highlighted red (errors take precedence)
+                        if has_errors and has_warnings:
+                            warning_data = field_data["warnings"][col_idx]
+                            field_name = warning_data.get("field",
+                                                          cols_original[col_idx] if col_idx < len(cols_original) else "")
+                            msgs = warning_data.get("messages", [])
+                            msgs_list = msgs if isinstance(msgs, list) else [msgs]
+                            for msg in msgs_list:
+                                tooltip_parts.append(f"Warning - {field_name}: {msg}")
+                        
+                        # Add combined tooltip
+                        if tooltip_parts:
+                            tooltip_text = "\n".join([f"• {part}" for part in tooltip_parts])
+                            # Truncate if too long
+                            max_length = 2000
+                            if len(tooltip_text) > max_length:
+                                tooltip_text = tooltip_text[:max_length] + "..."
+                            try:
+                                ws.write_comment(excel_row, col_idx, tooltip_text,
+                                                 {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
+                            except Exception:
+                                # If comment fails, continue without it
+                                pass
 
     buffer.seek(0)
     return dcc.send_bytes(buffer.getvalue(), "annotated_template.xlsx")
@@ -1240,8 +1280,8 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
     sample_types_processed = validation_data.get('sample_types_processed', []) or []
     
     # Get sample_results for summary data (structure: sample_results[sheet_name] = {valid_{type}s: [], invalid_{type}s: [], summary: {}})
-    # Fallback to results_by_type for backward compatibility
-    sample_results = validation_data.get('sample_results', {}) or validation_data.get('results_by_type', {}) or {}
+
+    sample_results = validation_data.get('sample_results', {}) or {}
 
     sheet_tabs = []
     sheets_with_data = []
@@ -1532,7 +1572,7 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
 
     # Get validation data
     validation_data = validation_results.get('results', {})
-    results_by_type = validation_data.get('results_by_type', {}) or {}
+    results_by_type = validation_data.get('sample_results', {}) or {}
     total_summary = validation_data.get('total_summary', {})
     sample_types = validation_data.get('sample_types_processed', []) or []
 
@@ -1608,6 +1648,32 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
                 if 0 <= idx < len(term_cols_after_health_status):
                     return term_cols_after_health_status[idx]
                 return term_cols_after_health_status[-1] if term_cols_after_health_status else None
+
+        # Special case for Breed Term Source ID - find Term Source ID column after Breed
+        if "Breed" in field_name and "Term Source ID" in field_name:
+            def _clean_col_name(col):
+                col_str = str(col)
+                if '.' in col_str:
+                    return col_str.split('.')[0]
+                return col_str
+
+            # Find Breed column
+            breed_col_idx = None
+            for i, col in enumerate(columns):
+                col_str = str(col)
+                if "Breed" in col_str and "Term Source ID" not in col_str:
+                    breed_col_idx = i
+                    break
+
+            # If Breed column found, find Term Source ID column immediately after it
+            if breed_col_idx is not None:
+                next_idx = breed_col_idx + 1
+                if next_idx < len(columns):
+                    next_col = columns[next_idx]
+                    cleaned_next = _clean_col_name(next_col)
+                    if cleaned_next == "Term Source ID":
+                        return next_col
+
         direct = _resolve_col(field_name, columns)
         if direct:
             return direct
@@ -1929,7 +1995,7 @@ def _calculate_sheet_statistics(validation_results, all_sheets_data):
         return sheet_stats
 
     validation_data = validation_results['results']
-    results_by_type = validation_data.get('results_by_type', {}) or {}
+    results_by_type = validation_data.get('sample_results', {}) or {}
     sample_types = validation_data.get('sample_types_processed', []) or []
 
     # Initialize sheet stats
@@ -2012,7 +2078,7 @@ def _mount_biosamples_form(v):
         raise PreventUpdate
 
     results = v.get("results", {})
-    if not results.get("results_by_type"):
+    if not results.get("sample_results"):
         raise PreventUpdate
 
     return biosamples_form()
