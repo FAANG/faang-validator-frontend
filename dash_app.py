@@ -228,9 +228,32 @@ def get_all_errors_and_warnings(record):
 
     # From 'errors' object
     if 'errors' in record and record['errors']:
+        # Handle errors.errors array (e.g., "Geographic Location: Field required")
+        if 'errors' in record['errors'] and isinstance(record['errors']['errors'], list):
+            for error_msg in record['errors']['errors']:
+                # Parse messages like "Geographic Location: Field required"
+                if ':' in error_msg:
+                    parts = error_msg.split(':', 1)
+                    field = parts[0].strip()
+                    message = parts[1].strip() if len(parts) > 1 else error_msg
+                    if field not in errors:
+                        errors[field] = []
+                    errors[field].append(message)
+                else:
+                    # If no field name found, add to 'general'
+                    if 'general' not in errors:
+                        errors['general'] = []
+                    errors['general'].append(error_msg)
+        
         if 'field_errors' in record['errors']:
             for field, messages in record['errors']['field_errors'].items():
-                errors[field] = messages
+                if field not in errors:
+                    errors[field] = []
+                # Ensure messages is a list
+                if isinstance(messages, list):
+                    errors[field].extend(messages)
+                else:
+                    errors[field].append(messages)
         if 'relationship_errors' in record['errors']:
             for message in record['errors']['relationship_errors']:
                 field_to_blame = 'general'
@@ -758,9 +781,6 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
         return current_children if current_children else html.Div([]), None
 
     error_data = []
-    records = []
-    valid_count = 0
-    invalid_count = 0
 
     all_sheets_validation_data = {}
     json_validation_results = None
@@ -781,7 +801,7 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
             print(f"JSON endpoint failed: {json_err}")
         if response.status_code == 200:
             response_json = response.json()
-            # print(json.dumps(response_json))
+
         else:
             raise Exception(f"Error {response.status_code}: {response.text}")
 
@@ -977,6 +997,35 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                     next_col = columns[next_idx]
                     cleaned_next = _clean_col_name(next_col)
                     if cleaned_next == "Term Source ID":
+                        return next_col
+
+        # Special case for Cell Type - map to Term Source ID column after Cell Type
+        # Handle both "Cell Type" and "cell_type" variations (case-insensitive)
+        field_name_lower = field_name.lower().replace("_", " ").replace("-", " ")
+        if "cell type" in field_name_lower:
+            def _clean_col_name(col):
+                col_str = str(col)
+                if '.' in col_str:
+                    return col_str.split('.')[0]
+                return col_str
+
+            # Find Cell Type column (handle both "Cell Type" and "cell_type" variations)
+            cell_type_col_idx = None
+            for i, col in enumerate(columns):
+                col_str = str(col)
+                col_str_normalized = col_str.lower().replace("_", " ").replace("-", " ")
+                if "cell type" in col_str_normalized and "term source id" not in col_str_normalized:
+                    cell_type_col_idx = i
+                    break
+
+            # If Cell Type column found, find Term Source ID column immediately after it
+            if cell_type_col_idx is not None:
+                next_idx = cell_type_col_idx + 1
+                if next_idx < len(columns):
+                    next_col = columns[next_idx]
+                    cleaned_next = _clean_col_name(next_col)
+                    cleaned_next_normalized = cleaned_next.lower().replace("_", " ").replace("-", " ")
+                    if cleaned_next_normalized == "term source id":
                         return next_col
 
         direct = _resolve_col(field_name, columns)
@@ -1674,6 +1723,35 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
                     if cleaned_next == "Term Source ID":
                         return next_col
 
+        # Special case for Cell Type - map to Term Source ID column after Cell Type
+        # Handle both "Cell Type" and "cell_type" variations (case-insensitive)
+        field_name_lower = field_name.lower().replace("_", " ").replace("-", " ")
+        if "cell type" in field_name_lower:
+            def _clean_col_name(col):
+                col_str = str(col)
+                if '.' in col_str:
+                    return col_str.split('.')[0]
+                return col_str
+
+            # Find Cell Type column (handle both "Cell Type" and "cell_type" variations)
+            cell_type_col_idx = None
+            for i, col in enumerate(columns):
+                col_str = str(col)
+                col_str_normalized = col_str.lower().replace("_", " ").replace("-", " ")
+                if "cell type" in col_str_normalized and "term source id" not in col_str_normalized:
+                    cell_type_col_idx = i
+                    break
+
+            # If Cell Type column found, find Term Source ID column immediately after it
+            if cell_type_col_idx is not None:
+                next_idx = cell_type_col_idx + 1
+                if next_idx < len(columns):
+                    next_col = columns[next_idx]
+                    cleaned_next = _clean_col_name(next_col)
+                    cleaned_next_normalized = cleaned_next.lower().replace("_", " ").replace("-", " ")
+                    if cleaned_next_normalized == "term source id":
+                        return next_col
+
         direct = _resolve_col(field_name, columns)
         if direct:
             return direct
@@ -1789,9 +1867,29 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
 
     # Count errors and warnings by field
     error_fields_count = {}
+    missing_required_fields = {}  # Track missing required fields that don't exist in the sheet
+    
     for sample_name, field_errors in error_map.items():
-        for field in field_errors.keys():
+        for field, msgs in field_errors.items():
             error_fields_count[field] = error_fields_count.get(field, 0) + 1
+            
+            # Check if this is a missing required field error (field not in sheet columns)
+            field_in_sheet = False
+            for col in df_all.columns:
+                if str(col).lower() == str(field).lower() or str(field).lower() in str(col).lower():
+                    field_in_sheet = True
+                    break
+            
+            # If field is not in sheet and has "Field required" or similar messages
+            if not field_in_sheet:
+                msgs_list = msgs if isinstance(msgs, list) else [msgs]
+                for msg in msgs_list:
+                    msg_lower = str(msg).lower()
+                    if "field required" in msg_lower or "required" in msg_lower:
+                        if field not in missing_required_fields:
+                            missing_required_fields[field] = []
+                        if msg not in missing_required_fields[field]:
+                            missing_required_fields[field].append(msg)
 
     warning_fields_count = {}
     for sample_name, field_warnings in warning_map.items():
@@ -1800,6 +1898,35 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
 
     # Build report sections
     report_sections = []
+    
+    # Panel for missing required fields
+    if missing_required_fields:
+        missing_fields_items = []
+        for field, msgs in missing_required_fields.items():
+            msgs_list = msgs if isinstance(msgs, list) else [msgs]
+            missing_fields_items.append(
+                html.Div([
+                    html.Span(f"{field}: ", style={'fontWeight': 'bold', 'color': '#f44336'}),
+                    html.Span(" | ".join(msgs_list), style={'color': '#666'})
+                ], style={'marginBottom': '8px', 'padding': '8px', 'backgroundColor': '#ffebee', 'borderRadius': '4px', 'borderLeft': '4px solid #f44336'})
+            )
+        
+        report_sections.append(
+            html.Div([
+                html.H5("Missing Required Fields", style={
+                    'marginTop': '20px',
+                    'marginBottom': '15px',
+                    'color': '#f44336',
+                    'borderBottom': '2px solid #f44336',
+                    'paddingBottom': '8px',
+                    'fontWeight': 'bold'
+                }),
+                html.Div(
+                    missing_fields_items,
+                    style={'padding': '10px', 'backgroundColor': '#ffebee', 'borderRadius': '6px'}
+                )
+            ])
+        )
 
     # Errors by field
     # if error_fields_count:
