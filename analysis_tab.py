@@ -334,7 +334,7 @@ def register_analysis_callbacks(app):
             try:
                 response = requests.post(
                     f'{BACKEND_API_URL}/validate-data',
-                    json={"data": parsed_json},
+                    json={"data": parsed_json,"data_type":"analysis"},
                     headers={'accept': 'application/json', 'Content-Type': 'application/json'}
                 )
                 if response.status_code != 200:
@@ -571,7 +571,7 @@ def register_analysis_callbacks(app):
             )
             return msg, dash.no_update
 
-        validation_results = v["results"]['analysis_results']
+        validation_results = v["results"]
 
         # Default values since components are not in layout
         env = "test"  # Default to test environment
@@ -585,7 +585,7 @@ def register_analysis_callbacks(app):
         }
 
         try:
-            url = "http://localhost:8000/submit-analysis-public"
+            url = "http://localhost:8000/submit-analysis"
             r = requests.post(url, json=body, timeout=600)
 
             if not r.ok:
@@ -1606,7 +1606,7 @@ def make_sheet_validation_panel_analysis(sheet_name: str, validation_results: di
     zebra = [{'if': {'row_index': 'odd'}, 'backgroundColor': 'rgb(248, 248, 248)'}]
 
     blocks = [
-        html.H4(f"Validation Results - {sheet_name}", style={'textAlign': 'center', 'margin': '10px 0'}),
+        html.H4(f"Validation Results - {sheet_name.capitalize()}", style={'textAlign': 'center', 'margin': '10px 0'}),
         html.Div([
             DataTable(
                 id={"type": "sheet-result-table-analysis", "sheet_name": sheet_name, "panel_id": panel_id},
