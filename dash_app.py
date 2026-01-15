@@ -790,7 +790,7 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
         try:
             response = requests.post(
                 f'{BACKEND_API_URL}/validate-data',
-                json={"data": parsed_json},
+                json={"data": parsed_json,"data_type":"sample"},
                 headers={'accept': 'application/json', 'Content-Type': 'application/json'}
             )
 
