@@ -332,7 +332,7 @@ def register_analysis_callbacks(app):
             try:
                 response = requests.post(
                     f'{BACKEND_API_URL}/validate-data',
-                    json={"data": parsed_json},
+                    json={"data": parsed_json,"data_type":"analysis"},
                     headers={'accept': 'application/json', 'Content-Type': 'application/json'}
                 )
                 if response.status_code != 200:

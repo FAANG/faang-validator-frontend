@@ -93,7 +93,7 @@ def create_biosamples_form_experiments():
 
 # Backend API URL - can be configured via environment variable
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
-                                 'http://localhost:8000')
+                                 'https://faang-validator-backend-service-964531885708.europe-west2.run.app')
 
 
 # Shared utility functions (copied to avoid circular imports)
@@ -448,7 +448,8 @@ def register_experiments_callbacks(app):
             try:
                 response = requests.post(
                     f'{BACKEND_API_URL}/validate-data',
-                    json={"data": parsed_json},
+                    json={"data": parsed_json,
+                          "data_type": "experiment" },
                     headers={'accept': 'application/json', 'Content-Type': 'application/json'}
                 )
                 if response.status_code != 200:
