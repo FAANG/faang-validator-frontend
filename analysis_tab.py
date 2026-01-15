@@ -26,7 +26,7 @@ def create_biosamples_form_analysis():
     """
     return html.Div(
         [
-            html.H2("Prepare data for submission", style={"marginBottom": "14px"}),
+            html.H2("Submit data to ENA", style={"marginBottom": "14px"}),
 
             html.Label("Username", style={"fontWeight": 600}),
             dcc.Input(
@@ -571,22 +571,21 @@ def register_analysis_callbacks(app):
             )
             return msg, dash.no_update
 
-        validation_results = v["results"]
+        validation_results = v["results"]['analysis_results']
 
         # Default values since components are not in layout
         env = "test"  # Default to test environment
         action = None  # Default to not updating existing
 
         body = {
-            "validation_results": validation_results,
+            "data": validation_results,
             "webin_username": username,
             "webin_password": password,
-            "mode": env or "test",  # Default to test if env is None
-            "update_existing": action == "update",
+            "mode": env or "test",
         }
 
         try:
-            url = "http://localhost:8000/submit_data_to_ena"
+            url = "http://localhost:8000/submit-analysis-public"
             r = requests.post(url, json=body, timeout=600)
 
             if not r.ok:
