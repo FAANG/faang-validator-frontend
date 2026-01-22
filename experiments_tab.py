@@ -61,15 +61,6 @@ def create_experiments():
                 }
             ),
 
-            dcc.RadioItems(
-                id="biosamples-env-experiments",
-                options=[{"label": " Test server", "value": "test"},
-                         {"label": " Production server", "value": "prod"}],
-                value="test",
-                labelStyle={"marginRight": "18px"},
-                style={"marginBottom": "16px"}
-            ),
-
             html.Div(id="experiments-status-banner-ena",
                      style={"display": "none", "padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px"}),
 
@@ -536,12 +527,11 @@ def register_experiments_callbacks(app):
         Input("experiments-submit-btn-ena", "n_clicks"),
         State("experiments-username-ena", "value"),
         State("experiments-password-ena", "value"),
-        State("biosamples-env-experiments", "value"),
         State("biosamples-action-experiments", "value"),
         State("stored-json-validation-results-experiments", "data"),
         prevent_initial_call=True,
     )
-    def _submit_experiments(n, username, password, env, action, v):
+    def _submit_experiments(n, username, password, action, v):
         """Submit to experiments for Experiments tab"""
         if not n:
             raise PreventUpdate
@@ -574,7 +564,7 @@ def register_experiments_callbacks(app):
             "data": validation_results,
             "webin_username": username,
             "webin_password": password,
-            "mode": env,
+            "mode": "test",  # Default to test server
             "update_existing": action == "submission",
         }
 
@@ -645,7 +635,7 @@ def register_experiments_callbacks(app):
                 )
             else:
                 table = html.Div(
-                    "No BioSample accessions returned.",
+                    "Error: submission failed",
                     style={"marginTop": "8px", "color": "#555"},
                 )
 
