@@ -82,8 +82,8 @@ def create_file_upload_area(tab_type: str):
             dcc.RadioItems(
                 id=f'biosamples-action-{tab_type}',
                 options=[
-                    {"label": " Submit new sample", "value": "submission"},
-                    # {"label": " Update existing sample", "value": "update"},
+                    {"label": f" Submit new {tab_type}", "value": "submission"},
+                    {"label": f" Update existing {tab_type}", "value": "update"},
                 ],
                 value="submission",
                 labelStyle={"marginRight": "24px"},
@@ -281,8 +281,8 @@ def create_tab_content(tab_type: str):
     """
     # Use experiments-specific BioSamples form for experiments tab
     if tab_type == 'experiments':
-        from experiments_tab import create_biosamples_form_experiments
-        biosamples_form = create_biosamples_form_experiments()
+        from experiments_tab import create_experiments
+        biosamples_form = create_experiments()
     elif tab_type == 'analysis':
         from analysis_tab import create_biosamples_form_analysis
         biosamples_form = create_biosamples_form_analysis()

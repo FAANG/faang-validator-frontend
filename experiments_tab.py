@@ -5,6 +5,8 @@ This module contains all experiments-specific functionality.
 import json
 import base64
 import io
+import re
+
 import pandas as pd
 import requests
 from dash import dcc, html, dash_table
@@ -17,12 +19,12 @@ import os
 from file_processor import process_headers, build_json_data
 
 
-def create_biosamples_form_experiments():
+def create_experiments():
     """
-    Create BioSamples submission form specifically for experiments tab.
+    Create experiments submission form specifically for experiments tab.
     
     Returns:
-        HTML Div containing BioSamples form for experiments
+        HTML Div containing experiments form for experiments
     """
     return html.Div(
         [
@@ -30,7 +32,7 @@ def create_biosamples_form_experiments():
 
             html.Label("Username", style={"fontWeight": 600}),
             dcc.Input(
-                id="biosamples-username-ena",
+                id="experiments-username-ena",
                 type="text",
                 placeholder="Webin username",
                 style={
@@ -49,7 +51,7 @@ def create_biosamples_form_experiments():
 
             html.Label("Password", style={"fontWeight": 600}),
             dcc.Input(
-                id="biosamples-password-ena",
+                id="experiments-password-ena",
                 type="password",
                 placeholder="Password",
                 style={
@@ -59,16 +61,16 @@ def create_biosamples_form_experiments():
                 }
             ),
 
-            # dcc.RadioItems(
-            #     id="biosamples-env-ena",
-            #     options=[{"label": " Test server", "value": "test"},
-            #              {"label": " Production server", "value": "prod"}],
-            #     value="test",
-            #     labelStyle={"marginRight": "18px"},
-            #     style={"marginBottom": "16px"}
-            # ),
+            dcc.RadioItems(
+                id="biosamples-env-experiments",
+                options=[{"label": " Test server", "value": "test"},
+                         {"label": " Production server", "value": "prod"}],
+                value="test",
+                labelStyle={"marginRight": "18px"},
+                style={"marginBottom": "16px"}
+            ),
 
-            html.Div(id="biosamples-status-banner-ena",
+            html.Div(id="experiments-status-banner-ena",
                      style={"display": "none", "padding": "10px 12px", "borderRadius": "8px", "marginBottom": "12px"}),
 
             dcc.Loading(
@@ -76,128 +78,115 @@ def create_biosamples_form_experiments():
                 type="circle",
                 children=html.Div([
                     html.Button(
-                        "Submit", id="biosamples-submit-btn-ena", n_clicks=0,
+                        "Submit", id="experiments-submit-btn-ena", n_clicks=0,
                         style={
                             "backgroundColor": "#673ab7", "color": "white", "padding": "10px 18px",
                             "border": "none", "borderRadius": "8px", "cursor": "pointer",
                             "fontSize": "16px", "width": "140px"
                         }
                     ),
-                    html.Div(id="biosamples-submit-msg-ena", style={"marginTop": "10px"}),
+                    html.Div(id="experiments-submit-msg-ena", style={"marginTop": "10px"}),
                 ])
             ),
         ],
-        id="biosamples-form-ena",
+        id="experiments-form-ena",
         style={"display": "none", "marginTop": "16px"},
     )
 
 # Backend API URL - can be configured via environment variable
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
-                                 'http://localhost:8000')
+                                 'https://faang-validator-backend-service-964531885708.europe-west2.run.app')
 
 
 def get_all_errors_and_warnings(record):
-    """Extract all errors and warnings from a validation record."""
-    import re
     errors = {}
     warnings = {}
 
-    # Build a mapping from identifiers to field names using data/model fields
-    # For experiments, the backend returns identifiers like "identifier" 
-    # but Excel columns use names like "Identifier"
-    identifier_to_field_name = {}
-    data = record.get('data', {}) or {}
-    model = record.get('model', {}) or {}
-    
-    # Use model first (has the actual field names), then data as fallback
-    source_dict = model if model else data
-    
-    # Create reverse mapping: lowercase identifier -> actual field name
-    for field_name in source_dict.keys():
-        if field_name:
-            # Create identifier versions (lowercase, underscore, etc.)
-            identifier_lower = field_name.lower().replace(' ', '_')
-            identifier_to_field_name[identifier_lower] = field_name
-            # Also map the original if it's already an identifier
-            identifier_to_field_name[field_name.lower()] = field_name
-            identifier_to_field_name[field_name] = field_name  # Direct match
-
-    def map_identifier_to_field_name(identifier):
-        """Map backend identifier to Excel field name."""
-        if not identifier:
-            return identifier
-        
-        # Direct match first
-        if identifier in identifier_to_field_name:
-            return identifier_to_field_name[identifier]
-        
-        # Try lowercase match
-        identifier_lower = identifier.lower()
-        if identifier_lower in identifier_to_field_name:
-            return identifier_to_field_name[identifier_lower]
-        
-        # Try replacing underscores with spaces and capitalizing
-        identifier_spaced = identifier.replace('_', ' ').title()
-        if identifier_spaced in source_dict:
-            return identifier_spaced
-        
-        # Try exact match in source_dict (case-insensitive)
-        for field_name in source_dict.keys():
-            if field_name.lower() == identifier_lower:
-                return field_name
-        
-        # If no match found, return original (might be a special field like "Cell Type.0")
-        return identifier
-
+    # From 'errors' object
     if 'errors' in record and record['errors']:
+        # Handle errors.errors array (e.g., "Geographic Location: Field required")
+        if 'errors' in record['errors'] and isinstance(record['errors']['errors'], list):
+            for error_msg in record['errors']['errors']:
+                # Parse messages like "Geographic Location: Field required"
+                if ':' in error_msg:
+                    parts = error_msg.split(':', 1)
+                    field = parts[0].strip()
+                    message = parts[1].strip() if len(parts) > 1 else error_msg
+                    if field not in errors:
+                        errors[field] = []
+                    errors[field].append(message)
+                else:
+                    # If no field name found, add to 'general'
+                    if 'general' not in errors:
+                        errors['general'] = []
+                    errors['general'].append(error_msg)
+
         if 'field_errors' in record['errors']:
             for field, messages in record['errors']['field_errors'].items():
-                # Map identifier to field name
-                mapped_field = map_identifier_to_field_name(field)
-                errors[mapped_field] = messages
+                if field not in errors:
+                    errors[field] = []
+                # Ensure messages is a list
+                if isinstance(messages, list):
+                    errors[field].extend(messages)
+                else:
+                    errors[field].append(messages)
         if 'relationship_errors' in record['errors']:
             for message in record['errors']['relationship_errors']:
                 field_to_blame = 'general'
-                if 'Child Of' in source_dict and source_dict.get('Child Of'):
+                data = record.get('data', {})
+                if 'Child Of' in data and data.get('Child Of'):
                     field_to_blame = 'Child Of'
-                elif 'Derived From' in source_dict and source_dict.get('Derived From'):
+                elif 'Derived From' in data and data.get('Derived From'):
                     field_to_blame = 'Derived From'
-                if field_to_blame not in errors:
-                    errors[field_to_blame] = []
-                errors[field_to_blame].append(message)
 
+                if field_to_blame not in warnings:
+                    warnings[field_to_blame] = []
+                warnings[field_to_blame].append(message)
+
+    # From 'field_warnings'
     if 'field_warnings' in record and record['field_warnings']:
         for field, messages in record['field_warnings'].items():
-            # Map identifier to field name
-            mapped_field = map_identifier_to_field_name(field)
-            warnings[mapped_field] = messages
+            warnings[field] = messages
 
+    # From 'ontology_warnings'
     if 'ontology_warnings' in record and record['ontology_warnings']:
         for message in record['ontology_warnings']:
             match = re.search(r"in field '([^']*)'", message)
             if match:
                 field = match.group(1)
-                # Map identifier to field name
-                mapped_field = map_identifier_to_field_name(field)
-                if mapped_field not in warnings:
-                    warnings[mapped_field] = []
-                warnings[mapped_field].append(message)
+                if field not in warnings:
+                    warnings[field] = []
+                warnings[field].append(message)
             else:
+                # Generic warning if field not found
                 if 'general' not in warnings:
                     warnings['general'] = []
                 warnings['general'].append(message)
 
+    # From 'relationship_errors' (top level - treat as warnings, yellow highlighting)
     if 'relationship_errors' in record and record['relationship_errors']:
+        # Try to associate with 'Child Of' or 'Derived From'
         field_to_blame = 'general'
-        if 'Child Of' in source_dict and source_dict.get('Child Of'):
+        data = record.get('data', {})
+        if 'Child Of' in data and data.get('Child Of'):
             field_to_blame = 'Child Of'
-        elif 'Derived From' in source_dict and source_dict.get('Derived From'):
+        elif 'Derived From' in data and data.get('Derived From'):
             field_to_blame = 'Derived From'
+
         if field_to_blame not in warnings:
             warnings[field_to_blame] = []
         warnings[field_to_blame].extend(record['relationship_errors'])
 
     return errors, warnings
+
+
+def _warnings_by_field(warnings_list):
+    by_field = {}
+    for w in warnings_list or []:
+        m = re.search(r"Field '([^']*)'", str(w))
+        field = m.group(1) if m else None
+        by_field.setdefault(field, []).append(str(w))
+    return by_field
 
 
 def _resolve_col(field, cols):
@@ -210,11 +199,14 @@ def _resolve_col(field, cols):
     return field if field in cols else None
 
 
+
+
+
 def _valid_invalid_experiments_counts(v):
     """Get valid/invalid counts for experiments using experiment_summary"""
     try:
         s = v.get("results", {}).get("experiment_summary", {}) or {}
-        return int(s.get("valid", 0)), int(s.get("invalid", 0))
+        return int(s.get("valid_experiments", 0)), int(s.get("invalid_experiments", 0))
     except Exception:
         return 0, 0
 
@@ -241,102 +233,41 @@ def register_experiments_callbacks(app):
         [State('upload-data-experiments', 'filename')]
     )
     def store_file_data_experiments(contents, filename):
-        """Store uploaded file data for Experiments tab"""
+        """
+        Store uploaded file data for Experiments tab.
+        This callback is optimized for performance by only storing the file
+        content and name, deferring all parsing to the validation step.
+        """
         if contents is None:
-            return None, None, "No file chosen", [], {'display': 'none'}, [], None, None, None, None
+            return None, None, "No file chosen", [], {'display': 'none'}, html.Div(), None, None, None, None
 
         try:
-            # Handle case where contents might not have comma (shouldn't happen but safety check)
-            if ',' not in contents:
-                raise ValueError("Invalid file format: missing content separator")
+            # Handle case where filename might be None
+            filename_display = filename if filename else "Unknown file"
             
-            content_type, content_string = contents.split(',', 1)  # Split only on first comma
-
-            # Validate file type
-            if not filename or not (filename.endswith('.xlsx') or filename.endswith('.xls')):
-                raise ValueError(f"Invalid file type. Please upload an Excel file (.xlsx or .xls). Got: {filename}")
-
-            # Parse Excel file to JSON immediately
-            try:
-                decoded = base64.b64decode(content_string)
-            except Exception as e:
-                raise ValueError(f"Error decoding file: {str(e)}")
-            
-            try:
-                excel_file = pd.ExcelFile(io.BytesIO(decoded), engine="openpyxl")
-            except Exception as e:
-                raise ValueError(f"Error reading Excel file: {str(e)}. Please ensure the file is a valid Excel file.")
-            sheet_names = excel_file.sheet_names
-            all_sheets_data = {}
-            parsed_json_data = {}
-
-            sheets_with_data = []
-
-            for sheet in sheet_names:
-                # Skip faang_field_values sheet
-                if sheet.lower() == "faang_field_values":
-                    continue
-                
-                df_sheet = excel_file.parse(sheet, dtype=str)
-                df_sheet = df_sheet.fillna("")
-
-                if df_sheet.empty or len(df_sheet) == 0:
-                    continue
-
-                sheet_records = df_sheet.to_dict("records")
-                all_sheets_data[sheet] = sheet_records
-
-                original_headers = [str(col) for col in df_sheet.columns]
-                processed_headers = process_headers(original_headers)
-
-                # Use vectorized conversion instead of iterrows() for much better performance
-                rows = df_sheet.values.tolist()
-
-                parsed_json_records = build_json_data(processed_headers, rows, sheet)
-                parsed_json_data[sheet] = parsed_json_records
-                sheets_with_data.append(sheet)
-
-            active_sheet = sheets_with_data[0] if sheets_with_data else None
-            sheet_names = sheets_with_data
-
+            # Display a simple message that the file has been selected
             file_selected_display = html.Div([
                 html.H3("File Selected", id='original-file-heading-experiments'),
-                html.P(f"File: {filename}", style={'fontWeight': 'bold'})
+                html.P(f"File: {filename_display}", style={'fontWeight': 'bold'})
             ])
 
-            if len(sheets_with_data) == 0:
-                output_data_upload_children = html.Div([
-                    html.P("No data found in any sheet. Please upload a file with data.",
-                           style={'color': 'orange', 'fontWeight': 'bold', 'margin': '20px 0'})
-                ], style={'margin': '20px 0'})
-            elif len(sheets_with_data) > 1:
-                output_data_upload_children = html.Div([
-                    dcc.Tabs(
-                        id='uploaded-sheets-tabs-experiments',
-                        value=active_sheet,
-                        children=[],
-                        style={'margin': '20px 0', 'border': 'none'},
-                        colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"}
-                    )
-                ], style={'margin': '20px 0'})
-            else:
-                output_data_upload_children = html.Div([
-                    html.P("Click 'Validate' to send data to backend for validation.",
-                           style={'marginTop': '20px', 'fontStyle': 'italic', 'color': '#666'})
-                ], style={'margin': '20px 0'})
-
-            return (contents, filename, filename, file_selected_display,
+            # Return file content and name to be stored, and update UI
+            # Set sheet data and parsed JSON to None since parsing is deferred
+            # Return empty div for output-data-upload-experiments (will be populated on validation)
+            return (contents, filename, filename_display, file_selected_display,
                     {'display': 'block', 'margin': '20px 0'},
-                    output_data_upload_children,
-                    all_sheets_data, sheet_names, parsed_json_data, active_sheet)
-
+                    html.Div(), None, None, None, None)
         except Exception as e:
+            # If there's an error, display it and still return the file data
             error_display = html.Div([
-                html.H5(filename),
-                html.P(f"Error processing file: {str(e)}", style={'color': 'red'})
+                html.H3("File Selected", id='original-file-heading-experiments'),
+                html.P(f"File: {filename if filename else 'Unknown'}", style={'fontWeight': 'bold'}),
+                html.P(f"Note: {str(e)}", style={'color': 'orange', 'fontSize': '12px'})
             ])
-            return contents, filename, filename, error_display, {'display': 'block',
-                                                                 'margin': '20px 0'}, [], None, None, None, None
+            return (contents, filename, filename if filename else "Unknown file", error_display,
+                    {'display': 'block', 'margin': '20px 0'},
+                    html.Div(),
+                    None, None, None, None)
 
     # Enable/disable validate button for Experiments tab
     @app.callback(
@@ -355,137 +286,140 @@ def register_experiments_callbacks(app):
     # Validation callback for Experiments tab
     @app.callback(
         [Output('output-data-upload-experiments', 'children', allow_duplicate=True),
-         Output('stored-json-validation-results-experiments', 'data')],
+         Output('stored-json-validation-results-experiments', 'data'),
+         Output('stored-all-sheets-data-experiments', 'data', allow_duplicate=True),
+         Output('stored-sheet-names-experiments', 'data', allow_duplicate=True)],
         [Input('validate-button-experiments', 'n_clicks')],
         [State('stored-file-data-experiments', 'data'),
          State('stored-filename-experiments', 'data'),
-         State('output-data-upload-experiments', 'children'),
-         State('stored-all-sheets-data-experiments', 'data'),
-         State('stored-sheet-names-experiments', 'data'),
-         State('stored-parsed-json-experiments', 'data')],
+         State('output-data-upload-experiments', 'children')],
         prevent_initial_call=True
     )
-    def validate_data_experiments(n_clicks, contents, filename, current_children, all_sheets_data, sheet_names, parsed_json):
-        """Validate data for Experiments tab with robust response handling"""
-        if n_clicks is None or parsed_json is None:
-            return current_children if current_children else html.Div([]), None
+    def validate_data_experiments(n_clicks, contents, filename, current_children):
+        """
+        Validate data for Experiments tab.
+        This callback now handles file parsing and JSON conversion, which was
+        moved from the file upload callback for performance reasons.
+        """
+        global json_validation_results
+        if n_clicks is None or contents is None:
+            return current_children or html.Div([]), None, None, None
 
-        error_data = []
-        all_sheets_validation_data = {}
-        print(json.dumps(parsed_json))
+        def create_output(components):
+            if current_children is None:
+                return html.Div(components)
+            if isinstance(current_children, list):
+                return html.Div(current_children + components)
+            return html.Div([current_children] + components)
+
         try:
-            try:
-                response = requests.post(
-                    f'{BACKEND_API_URL}/validate-data',
-                    json={"data": parsed_json,
-                          "data_type": "experiment" },
-                    headers={'accept': 'application/json', 'Content-Type': 'application/json'}
-                )
-                if response.status_code != 200:
-                    raise Exception(f"JSON endpoint returned {response.status_code}")
-            except Exception as json_err:
-                # Fallback: if JSON endpoint doesn't exist, send as file
-                print(f"JSON endpoint failed: {json_err}")
-            if response.status_code == 200:
-                response_json = response.json()
-            else:
-                raise Exception(f"Error {response.status_code}: {response.text}")
+            # Decode file content and parse Excel file
+            content_type, content_string = contents.split(',', 1)
+            decoded = base64.b64decode(content_string)
+            excel_file = pd.ExcelFile(io.BytesIO(decoded), engine="openpyxl")
+            
+            sheet_names = excel_file.sheet_names
+            all_sheets_data = {}
+            parsed_json = {}
+            sheets_with_data = []
 
-            if isinstance(response_json, dict) and 'results' in response_json:
-                json_validation_results = response_json
-                validation_results = response_json['results']
-                experiment_summary = validation_results.get('experiment_summary', {})
-                total_summary = validation_results.get('total_summary', {})
-                valid_count = experiment_summary.get('valid', 0)
-                invalid_count = experiment_summary.get('invalid', 0)
-
-            elif isinstance(response_json, dict):
-                # Backend might return data directly without 'results' wrapper
-                # Try to extract data from various possible structures
-                if 'experiment_summary' in response_json or 'experiment_types_processed' in response_json:
-                    # Data is at top level, wrap it in 'results'
-                    json_validation_results = {"results": response_json}
-                    validation_results = response_json
-                    experiment_summary = validation_results.get('experiment_summary', {})
-                    total_summary = validation_results.get('total_summary', {})
-
-                    valid_count = experiment_summary.get('valid', 0)
-                    invalid_count = experiment_summary.get('invalid', 0)
-
+            # Process each sheet in the Excel file
+            for sheet in sheet_names:
+                if sheet.lower() == "faang_field_values":
+                    continue
+                
+                df_sheet = excel_file.parse(sheet, dtype=str).fillna("")
+                
+                # Store ALL sheets in all_sheets_data (including empty ones) for download functionality
+                # This ensures all sheets are available for download, even if they're empty
+                # For empty sheets, preserve column structure by storing columns info
+                if df_sheet.empty:
+                    # Store empty records but preserve column structure
+                    # Store as dict with columns key for empty sheets
+                    all_sheets_data[sheet] = {
+                        "_empty": True,
+                        "_columns": list(df_sheet.columns),
+                        "records": []
+                    }
                 else:
-                    # Unknown format, try to extract what we can
-                    validation_data = response_json
-                    valid_count = validation_data.get('valid', 0)
-                    invalid_count = validation_data.get('invalid', 0)
-                    error_data = validation_data.get('warnings', [])
+                    # Store normal records for non-empty sheets
+                    all_sheets_data[sheet] = df_sheet.to_dict("records")
+                
+                # Only process non-empty sheets for validation
+                if df_sheet.empty:
+                    continue
 
-                    # Try to build a minimal structure
-                    json_validation_results = {
-                        "results": {
-                            "total_summary": {
-                                "valid_samples": valid_count,
-                                "invalid_samples": invalid_count
-                            },
-                            "experiment_results": {},
-                            "experiment_types_processed": []
-                        }
-                    }
-            else:
-                # Old format (list) - convert to new format for consistency
-                validation_data = response_json[0] if isinstance(response_json, list) else response_json
-                records = validation_data.get('validation_result', [])
-                valid_count = validation_data.get('valid_experiments', 0)
-                invalid_count =  validation_data.get('invalid_experiments', 0)
-                error_data = validation_data.get('warnings', [])
-                all_sheets_validation_data = validation_data.get('all_sheets_data', {})
+                sheets_with_data.append(sheet)
 
-                if not all_sheets_validation_data and sheet_names:
-                    first_sheet = sheet_names[0]
-                    all_sheets_validation_data = {first_sheet: records}
+                # Convert sheet to JSON for validation
+                original_headers = [str(col) for col in df_sheet.columns]
+                processed_headers = process_headers(original_headers)
+                rows = df_sheet.values.tolist()
+                parsed_json[sheet] = build_json_data(processed_headers, rows, sheet)
 
-                # Convert old format to new format structure
-                json_validation_results = {
-                    "results": {
-                        "total_summary": {
-                            "valid_samples": valid_count,
-                            "invalid_samples": invalid_count
-                        },
-                        "experiment_results": all_sheets_validation_data,
-                        "experiment_types_processed": list(all_sheets_validation_data.keys()) if all_sheets_validation_data else []
-                    }
-                }
+            if not parsed_json:
+                # Handle case where no data was found in any sheet
+                no_data_msg = html.P("No data found in the uploaded file.", style={'color': 'orange'})
+                return create_output([no_data_msg]), None, None, None
 
         except Exception as e:
+            # Handle file parsing errors
             error_div = html.Div([
                 html.H5(filename),
-                html.P(f"Error connecting to backend API: {str(e)}", style={'color': 'red'})
+                html.P(f"Error processing file: {str(e)}", style={'color': 'red'})
             ])
-            return html.Div(current_children + [error_div] if isinstance(current_children, list) else [current_children,
-                                                                                                       error_div]), None
+            return create_output([error_div]), None, None, None
 
+        # Send data to backend for validation
+        print("file uploaded!!")
+        print(json.dumps(parsed_json))
+        try:
+            response = requests.post(
+                f'{BACKEND_API_URL}/validate-data',
+                json={"data": parsed_json, "data_type": "experiment"},
+                headers={'accept': 'application/json', 'Content-Type': 'application/json'}
+            )
+
+            if response.status_code != 200:
+                raise Exception(f"JSON endpoint returned {response.status_code}")
+        except Exception as json_err:
+            # Fallback: if JSON endpoint doesn't exist, send as file
+            print(f"JSON endpoint failed: {json_err}")
+        if response.status_code == 200:
+            response_json = response.json()
+
+        else:
+            raise Exception(f"Error {response.status_code}: {response.text}")
+
+    # Process validation response
+    # (The logic for handling different response formats remains the same)
+        if isinstance(response_json, dict) and 'results' in response_json:
+            json_validation_results = response_json
+        elif isinstance(response_json, dict):
+            json_validation_results = {"results": response_json}
+        else:
+            # Handle legacy list format if necessary
+            validation_data = response_json[0] if isinstance(response_json, list) else response_json
+            valid_count = validation_data.get('valid_experiments', 0)
+            invalid_count = validation_data.get('invalid_experiments', 0)
+            all_sheets_validation_data = validation_data.get('all_sheets_data', {})
+
+        # Create validation result components
         validation_components = [
-            dcc.Store(id='stored-error-data-experiments', data=error_data),
-            dcc.Store(id='stored-validation-results-experiments', data={'valid_count': valid_count, 'invalid_count': invalid_count,
-                                                            'all_sheets_data': all_sheets_validation_data}),
             html.H3("2. Conversion and Validation results"),
-
             html.Div([
                 html.P("Conversion Status", style={'fontWeight': 'bold'}),
                 html.P("Success", style={'color': 'green', 'fontWeight': 'bold'}),
                 html.P("Validation Status", style={'fontWeight': 'bold'}),
                 html.P("Finished", style={'color': 'green', 'fontWeight': 'bold'}),
             ], style={'margin': '10px 0'}),
-
             html.Div(id='error-table-container-experiments', style={'display': 'none'}),
             html.Div(id='validation-results-container-experiments', style={'margin': '20px 0'})
         ]
 
-        if current_children is None:
-            return html.Div(validation_components), json_validation_results if json_validation_results else {'results': {}}
-        elif isinstance(current_children, list):
-            return html.Div(current_children + validation_components), json_validation_results if json_validation_results else {'results': {}}
-        else:
-            return html.Div(validation_components + [current_children]), json_validation_results if json_validation_results else {'results': {}}
+        # Update the UI with validation results
+        output_children = create_output(validation_components)
+        return output_children, json_validation_results, all_sheets_data, sheets_with_data
 
     # Reset callback for Experiments tab
     app.clientside_callback(
@@ -502,17 +436,17 @@ def register_experiments_callbacks(app):
         prevent_initial_call=True,
     )
 
-    # BioSamples form toggle for Experiments tab
+    # experiments form toggle for Experiments tab
     @app.callback(
         [
-            Output("biosamples-form-ena", "style"),
-            Output("biosamples-status-banner-ena", "children"),
-            Output("biosamples-status-banner-ena", "style"),
+            Output("experiments-form-ena", "style"),
+            Output("experiments-status-banner-ena", "children"),
+            Output("experiments-status-banner-ena", "style"),
         ],
         Input("stored-json-validation-results-experiments", "data"),
     )
-    def _toggle_biosamples_form_experiments(v):
-        """Toggle BioSamples form visibility for Experiments tab"""
+    def _toggle_experiments_form_experiments(v):
+        """Toggle experiments form visibility for Experiments tab"""
         base_style = {"display": "block", "marginTop": "16px"}
 
         if not v or "results" not in v:
@@ -554,40 +488,61 @@ def register_experiments_callbacks(app):
                 style_warn,
             )
 
-    # BioSamples submit button enable/disable for Experiments tab
+    # experiments submit button enable/disable for Experiments tab
     @app.callback(
-        Output("biosamples-submit-btn-ena", "disabled"),
         [
-            Input("biosamples-username-ena", "value"),
-            Input("biosamples-password-ena", "value"),
+            Output("experiments-submit-btn-ena", "disabled"),
+            Output("experiments-submit-btn-ena", "style"),
+        ],
+        [
+            Input("experiments-username-ena", "value"),
+            Input("experiments-password-ena", "value"),
             Input("stored-json-validation-results-experiments", "data"),
         ],
     )
     def _disable_submit_experiments(u, p, v):
         """Enable/disable submit button for Experiments tab"""
+        # Default enabled style
+        enabled_style = {
+            "backgroundColor": "#673ab7", "color": "white", "padding": "10px 18px",
+            "border": "none", "borderRadius": "8px", "cursor": "pointer",
+            "fontSize": "16px", "width": "140px"
+        }
+        # Disabled style (grayed out)
+        disabled_style = {
+            "backgroundColor": "#cccccc", "color": "#666666", "padding": "10px 18px",
+            "border": "none", "borderRadius": "8px", "cursor": "not-allowed",
+            "fontSize": "16px", "width": "140px", "opacity": "0.6"
+        }
+        
         if not v or "results" not in v:
-            return True
-        valid_cnt, _ = _valid_invalid_experiments_counts(v)
+            return True, disabled_style
+        valid_cnt, invalid_cnt = _valid_invalid_experiments_counts(v)
+        # Disable if there are any invalid experiments
+        if invalid_cnt > 0:
+            return True, disabled_style  # Disable if there are invalid experiments
+        # All experiments are valid, enable if username and password are provided
         if valid_cnt == 0:
-            return True
-        return not (u and p)
+            return True, disabled_style
+        is_enabled = u and p
+        return not is_enabled, enabled_style if is_enabled else disabled_style
 
-    # BioSamples submission for Experiments tab
+    # experiments submission for Experiments tab
     @app.callback(
         [
-            Output("biosamples-submit-msg-ena", "children"),
+            Output("experiments-submit-msg-ena", "children"),
             Output("biosamples-results-table-experiments", "children"),
         ],
-        Input("biosamples-submit-btn-ena", "n_clicks"),
-        State("biosamples-username-ena", "value"),
-        State("biosamples-password-ena", "value"),
-        State("biosamples-env-ena", "value"),
+        Input("experiments-submit-btn-ena", "n_clicks"),
+        State("experiments-username-ena", "value"),
+        State("experiments-password-ena", "value"),
+        State("biosamples-env-experiments", "value"),
         State("biosamples-action-experiments", "value"),
         State("stored-json-validation-results-experiments", "data"),
         prevent_initial_call=True,
     )
-    def _submit_to_biosamples_experiments(n, username, password, env, action, v):
-        """Submit to BioSamples for Experiments tab"""
+    def _submit_experiments(n, username, password, env, action, v):
+        """Submit to experiments for Experiments tab"""
         if not n:
             raise PreventUpdate
 
@@ -616,15 +571,15 @@ def register_experiments_callbacks(app):
         validation_results = v["results"]
 
         body = {
-            "validation_results": validation_results,
+            "data": validation_results,
             "webin_username": username,
             "webin_password": password,
             "mode": env,
-            "update_existing": action == "update",
+            "update_existing": action == "submission",
         }
 
         try:
-            url = f"{BACKEND_API_URL}/submit-to-biosamples"
+            url = f"{BACKEND_API_URL}/submit-experiment"
             r = requests.post(url, json=body, timeout=600)
 
             if not r.ok:
@@ -720,13 +675,17 @@ def register_experiments_callbacks(app):
 
         validation_data = validation_results['results']
         
-        # Filter sheet_names to only include those in experiment_types_processed
+        # OPTIMIZATION: Filter sheet_names to only include those in experiment_types_processed
+        # This ensures we only process sheets that were actually processed by the backend
         experiment_types_processed = validation_data.get('experiment_types_processed', []) or []
         if experiment_types_processed:
             # Only show sheets that are in experiment_types_processed
             sheet_names = [sheet for sheet in sheet_names if sheet in experiment_types_processed]
+            # Also filter all_sheets_data to only include processed sheets for better performance
+            if all_sheets_data:
+                all_sheets_data = {k: v for k, v in all_sheets_data.items() if k in experiment_types_processed}
 
-        # Calculate sheet statistics for experiments
+        # Calculate sheet statistics for experiments (now only processes filtered sheets)
         sheet_stats = _calculate_sheet_statistics_experiments(validation_results, all_sheets_data or {})
 
         sheet_tabs = []
@@ -805,6 +764,7 @@ def register_experiments_callbacks(app):
                     "Download annotated template",
                     id="download-errors-btn-experiments",
                     n_clicks=0,
+                    disabled=False,
                     style={
                         'backgroundColor': '#ffd740',
                         'color': 'black',
@@ -812,7 +772,10 @@ def register_experiments_callbacks(app):
                         'border': 'none',
                         'borderRadius': '4px',
                         'cursor': 'pointer',
-                        'fontSize': '16px'
+                        'fontSize': '16px',
+                        'pointerEvents': 'auto',
+                        'position': 'relative',
+                        'zIndex': 1
                     }
                 ),
             ],
@@ -820,11 +783,14 @@ def register_experiments_callbacks(app):
                 'display': 'flex',
                 'justifyContent': 'space-between',
                 'alignItems': 'center',
-                'marginBottom': '10px'
+                'marginBottom': '10px',
+                'position': 'relative',
+                'zIndex': 1
             }
         )
 
-        return html.Div([header_bar, tabs], style={"marginTop": "8px"})
+        return html.Div([header_bar, tabs], style={"marginTop": "8px",
+                                                   "transition": "opacity 0.3s ease-in-out"})
 
     # Clientside callback to style tab labels with colors
     app.clientside_callback(
@@ -973,103 +939,172 @@ def register_experiments_callbacks(app):
         if not n_clicks:
             raise PreventUpdate
 
-        if not all_sheets_data or not sheet_names:
+        if not all_sheets_data:
             raise PreventUpdate
+        
+        # Use all sheets from all_sheets_data, not just sheet_names
+        # This ensures all sheets (including empty ones) are included in the download
+        all_sheet_names = list(all_sheets_data.keys())
 
         # Build a mapping of experiment identifiers to their field-level errors/warnings
         # Structure: {identifier_normalized: {"errors": {field: [msgs]}, "warnings": {field: [msgs]}}}
         identifier_to_field_errors = {}
 
         # Helper function to map backend field names to Excel column names
+        # Use the EXACT same mapping function as validation results panel (_map_field_to_column)
         def _map_field_to_column_excel(field_name, columns):
             if not field_name:
                 return None
+            
+            # Handle Health Status fields (with or without .term) - same as validation panel
+            if "Health Status" in field_name:
+                if ".term" in field_name:
+                    try:
+                        parts = field_name.split(".")
+                        idx = int(parts[1])
+                    except Exception:
+                        idx = 0
 
-            # 1) Special case for Health Status term errors
-            if field_name.startswith("Health Status") and ".term" in field_name:
-                try:
-                    parts = field_name.split(".")
-                    idx = int(parts[1])
-                except Exception:
-                    idx = 0
+                    def _clean_col_name(col):
+                        col_str = str(col)
+                        if '.' in col_str:
+                            return col_str.split('.')[0]
+                        return col_str
 
-                def _clean_col_name(col):
-                    col_str = str(col)
-                    if '.' in col_str:
-                        return col_str.split('.')[0]
-                    return col_str
+                    health_status_cols = []
+                    for i, col in enumerate(columns):
+                        col_str = str(col)
+                        if "Health Status" in col_str and "Term Source ID" not in col_str:
+                            health_status_cols.append((i, col))
+                    term_cols_after_health_status = []
+                    for hs_idx, hs_col in health_status_cols:
+                        next_idx = hs_idx + 1
+                        if next_idx < len(columns):
+                            next_col = columns[next_idx]
+                            cleaned_next = _clean_col_name(next_col)
+                            if cleaned_next == "Term Source ID":
+                                term_cols_after_health_status.append(next_col)
+                    if term_cols_after_health_status:
+                        if 0 <= idx < len(term_cols_after_health_status):
+                            return term_cols_after_health_status[idx]
+                        return term_cols_after_health_status[-1] if term_cols_after_health_status else None
+                else:
+                    # Health Status without .term - find the first Health Status column
+                    for col in columns:
+                        col_str = str(col)
+                        if "Health Status" in col_str and "Term Source ID" not in col_str:
+                            return col
+            
+            # Handle Cell Type fields (with or without .term) - same as validation panel
+            if "Cell Type" in field_name:
+                if ".term" in field_name:
+                    try:
+                        parts = field_name.split(".")
+                        idx = int(parts[1])
+                    except Exception:
+                        idx = 0
 
-                # Find all Health Status columns in order
-                health_status_cols = []
-                for i, col in enumerate(columns):
-                    col_str = str(col)
-                    if "Health Status" in col_str and "Term Source ID" not in col_str:
-                        health_status_cols.append((i, col))
+                    def _clean_col_name(col):
+                        col_str = str(col)
+                        if '.' in col_str:
+                            return col_str.split('.')[0]
+                        return col_str
 
-                # For each Health Status column, find the Term Source ID column immediately after it
-                term_cols_after_health_status = []
-                for hs_idx, hs_col in health_status_cols:
-                    next_idx = hs_idx + 1
-                    if next_idx < len(columns):
-                        next_col = columns[next_idx]
-                        cleaned_next = _clean_col_name(next_col)
-                        if cleaned_next == "Term Source ID":
-                            term_cols_after_health_status.append(next_col)
-
-                if term_cols_after_health_status:
-                    if 0 <= idx < len(term_cols_after_health_status):
-                        return term_cols_after_health_status[idx]
-                    return term_cols_after_health_status[-1] if term_cols_after_health_status else None
-
-            # 2) Special case for Cell Type - map to Term Source ID column after Cell Type
-            field_name_lower = field_name.lower().replace("_", " ").replace("-", " ")
-            if "cell type" in field_name_lower:
-                def _clean_col_name(col):
-                    col_str = str(col)
-                    if '.' in col_str:
-                        return col_str.split('.')[0]
-                    return col_str
-
-                # Find Cell Type column
-                cell_type_col_idx = None
-                for i, col in enumerate(columns):
-                    col_str = str(col)
-                    col_str_normalized = col_str.lower().replace("_", " ").replace("-", " ")
-                    if "cell type" in col_str_normalized and "term source id" not in col_str_normalized:
-                        cell_type_col_idx = i
-                        break
-
-                # If Cell Type column found, find Term Source ID column immediately after it
-                if cell_type_col_idx is not None:
-                    next_idx = cell_type_col_idx + 1
-                    if next_idx < len(columns):
-                        next_col = columns[next_idx]
-                        cleaned_next = _clean_col_name(next_col)
-                        cleaned_next_normalized = cleaned_next.lower().replace("_", " ").replace("-", " ")
-                        if cleaned_next_normalized == "term source id":
-                            return next_col
-
-            # 3) Try direct match (case-insensitive)
-            direct = _resolve_col(field_name, columns)
-            if direct:
-                return direct
-
-            # 4) Special handling for generic "Term Source ID"
-            if field_name == "Term Source ID" or field_name.lower() == "term source id":
+                    cell_type_cols = []
+                    for i, col in enumerate(columns):
+                        col_str = str(col)
+                        if "Cell Type" in col_str and "Term Source ID" not in col_str:
+                            cell_type_cols.append((i, col))
+                    term_cols_after_cell_type = []
+                    for ct_idx, ct_col in cell_type_cols:
+                        next_idx = ct_idx + 1
+                        if next_idx < len(columns):
+                            next_col = columns[next_idx]
+                            cleaned_next = _clean_col_name(next_col)
+                            if cleaned_next == "Term Source ID":
+                                term_cols_after_cell_type.append(next_col)
+                    if term_cols_after_cell_type:
+                        if 0 <= idx < len(term_cols_after_cell_type):
+                            return term_cols_after_cell_type[idx]
+                        return term_cols_after_cell_type[-1] if term_cols_after_cell_type else None
+                else:
+                    # Cell Type without .term - find the first Cell Type column
+                    for col in columns:
+                        col_str = str(col)
+                        if "Cell Type" in col_str and "Term Source ID" not in col_str:
+                            return col
+            
+            # Handle Secondary Project fields - same as validation panel
+            if field_name and "secondary project" in field_name.lower():
+                # Extract index from field name if present (e.g., "Secondary Project.0" -> 0, "Secondary Project.1" -> 1)
+                field_index = None
+                field_lower = field_name.lower()
+                if "." in field_lower:
+                    parts = field_lower.split(".", 1)
+                    if len(parts) > 1 and parts[1].isdigit():
+                        field_index = int(parts[1])
+                
+                # Collect all Secondary Project columns in order
+                secondary_project_cols = []
                 for col in columns:
                     col_str = str(col)
-                    if col_str.lower() == "term source id":
+                    col_lower = col_str.lower()
+                    # Match exact "Secondary Project" or numbered versions like "Secondary Project.0", "Secondary Project.1"
+                    if col_lower == "secondary project" or col_lower.startswith("secondary project."):
+                        secondary_project_cols.append(col)
+                
+                if secondary_project_cols:
+                    # If field has a specific index (e.g., "Secondary Project.0"), try to match that index
+                    if field_index is not None and 0 <= field_index < len(secondary_project_cols):
+                        # Try to find column with matching index first
+                        for col in secondary_project_cols:
+                            col_str = str(col)
+                            col_lower = col_str.lower()
+                            if "." in col_lower:
+                                col_parts = col_lower.split(".", 1)
+                                if len(col_parts) > 1 and col_parts[1].isdigit():
+                                    if int(col_parts[1]) == field_index:
+                                        return col
+                        # If no exact index match, return the column at that position
+                        return secondary_project_cols[field_index]
+                    else:
+                        # No specific index in field name, or index out of range - return first Secondary Project column
+                        return secondary_project_cols[0]
+                
+                # Fallback: try any column that starts with "Secondary Project" (case insensitive)
+                for col in columns:
+                    col_str = str(col)
+                    if col_str.lower().startswith("secondary project"):
                         return col
+            
+            # Handle Term Source ID fields - same as validation panel
+            if field_name and field_name.lower().startswith("term source id"):
+                # Find the first "Term Source ID" column (without numbered suffix first, then with suffix)
+                for col in columns:
+                    col_str = str(col)
+                    col_lower = col_str.lower()
+                    # Try exact match first
+                    if col_lower == "term source id":
+                        return col
+                # If no exact match, try numbered versions (Term Source ID.1, Term Source ID.2, etc.)
                 for col in columns:
                     col_str = str(col)
                     col_lower = col_str.lower()
                     if col_lower.startswith("term source id."):
-                        suffix = col_lower[len("term source id."):]
-                        if suffix and suffix.isdigit():
-                            if col_str[:len("Term Source ID")].lower() == "term source id":
-                                return col
-
-            # 5) If field has dot notation, try using only the base name
+                        # This is a numbered Term Source ID column - return the first one found
+                        return col
+                # If still no match, try columns that contain "Term Source ID" (case insensitive)
+                for col in columns:
+                    col_str = str(col)
+                    if "term source id" in col_str.lower():
+                        return col
+            
+            # Try direct match first
+            direct = _resolve_col(field_name, columns)
+            if direct:
+                return direct
+            
+            # Handle fields with dot notation (e.g., "Secondary Project.0", "Field.1", etc.)
             if "." in field_name:
                 base = field_name.split(".", 1)[0]
                 # Try to match the base field name (e.g., "Secondary Project" from "Secondary Project.0")
@@ -1091,31 +1126,30 @@ def register_experiments_callbacks(app):
                             col_base = col_str.split(".", 1)[0]
                             if col_base.lower() == base_lower:
                                 return col
-
+            
             return None
 
         if validation_results and 'results' in validation_results:
             validation_data = validation_results['results']
             results_by_type = validation_data.get('experiment_results', {}) or {}
-            experiment_types = validation_data.get('experiment_types_processed', []) or []
+            experiment_types_processed = validation_data.get('experiment_types_processed', []) or []
 
-            for experiment_type in experiment_types:
+            # Use the same logic as make_sheet_validation_panel_experiments
+            for experiment_type in experiment_types_processed:
                 et_data = results_by_type.get(experiment_type, {}) or {}
-                et_key = experiment_type.replace(' ', '_')
-                invalid_key = f"invalid_{et_key}s"
-                if invalid_key.endswith('ss'):
-                    invalid_key = invalid_key[:-1]
-                valid_key = f"valid_{et_key}s"
+                # Use simple keys like validation panel: "invalid" and "valid"
+                invalid_key = "invalid"
+                valid_key = "valid"
 
                 # Process invalid records with errors
                 invalid_records = et_data.get(invalid_key, [])
                 for record in invalid_records:
-                    # Try to get identifier from various possible fields
-                    identifier = record.get("identifier", "") or record.get("Identifier", "")
-                    if not identifier:
+                    # Use same field name as validation panel
+                    sample_descriptor = record.get("sample_descriptor", "")
+                    if not sample_descriptor:
                         continue
 
-                    identifier_normalized = str(identifier).strip().lower()
+                    identifier_normalized = str(sample_descriptor).strip().lower()
                     errors, warnings = get_all_errors_and_warnings(record)
 
                     if errors or warnings:
@@ -1129,50 +1163,48 @@ def register_experiments_callbacks(app):
                 # Process valid records with warnings
                 valid_records = et_data.get(valid_key, [])
                 for record in valid_records:
-                    # Try to get identifier from various possible fields
-                    identifier = record.get("identifier", "") or record.get("Identifier", "")
-                    if not identifier:
+                    # Use same field name as validation panel
+                    sample_descriptor = record.get("sample_descriptor", "")
+                    if not sample_descriptor:
                         continue
 
-                    identifier_normalized = str(identifier).strip().lower()
+                    identifier_normalized = str(sample_descriptor).strip().lower()
                     errors, warnings = get_all_errors_and_warnings(record)
 
-                    if errors or warnings:
+                    if warnings:
                         if identifier_normalized not in identifier_to_field_errors:
                             identifier_to_field_errors[identifier_normalized] = {"errors": {}, "warnings": {}}
-                        if errors:
-                            # Merge errors if they exist
-                            for field, msgs in errors.items():
-                                if field in identifier_to_field_errors[identifier_normalized]["errors"]:
-                                    existing = identifier_to_field_errors[identifier_normalized]["errors"][field]
-                                    if isinstance(existing, list):
-                                        existing.extend(msgs if isinstance(msgs, list) else [msgs])
-                                    else:
-                                        identifier_to_field_errors[identifier_normalized]["errors"][field] = [existing] + (msgs if isinstance(msgs, list) else [msgs])
-                                else:
-                                    identifier_to_field_errors[identifier_normalized]["errors"][field] = msgs
-                        if warnings:
-                            # Merge warnings if they exist
-                            for field, msgs in warnings.items():
-                                if field in identifier_to_field_errors[identifier_normalized]["warnings"]:
-                                    existing = identifier_to_field_errors[identifier_normalized]["warnings"][field]
-                                    if isinstance(existing, list):
-                                        existing.extend(msgs if isinstance(msgs, list) else [msgs])
-                                    else:
-                                        identifier_to_field_errors[identifier_normalized]["warnings"][field] = [existing] + (msgs if isinstance(msgs, list) else [msgs])
-                                else:
-                                    identifier_to_field_errors[identifier_normalized]["warnings"][field] = msgs
+                        identifier_to_field_errors[identifier_normalized]["warnings"] = warnings
 
         buffer = io.BytesIO()
 
         with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-            for sheet_name in sheet_names:
-                if sheet_name not in all_sheets_data:
-                    continue
+            # Process all sheets from all_sheets_data to ensure all sheets are included
+            for sheet_name in all_sheet_names:
 
                 # Get original sheet data
-                sheet_records = all_sheets_data[sheet_name]
+                sheet_data = all_sheets_data[sheet_name]
+                
+                # Handle empty sheets - check if it's stored with special structure
+                if isinstance(sheet_data, dict) and sheet_data.get("_empty"):
+                    # This is an empty sheet with preserved column structure
+                    columns = sheet_data.get("_columns", [])
+                    # Create DataFrame with preserved columns but no rows
+                    df = pd.DataFrame(columns=columns)
+                    # Write empty sheet to Excel with preserved columns
+                    sheet_name_clean = sheet_name[:31]  # Excel sheet name limit
+                    df.to_excel(writer, sheet_name=sheet_name_clean, index=False)
+                    continue
+                
+                # Normal sheet with data
+                sheet_records = sheet_data if isinstance(sheet_data, list) else []
+                
+                # Skip if somehow still empty
                 if not sheet_records:
+                    # Fallback: create empty DataFrame
+                    df = pd.DataFrame([{}])
+                    sheet_name_clean = sheet_name[:31]
+                    df.to_excel(writer, sheet_name=sheet_name_clean, index=False)
                     continue
 
                 # Convert to DataFrame
@@ -1180,21 +1212,14 @@ def register_experiments_callbacks(app):
 
                 # Map field errors/warnings to columns for highlighting
                 row_to_field_errors = {}  # {row_index: {"errors": {col_idx: msgs}, "warnings": {col_idx: msgs}}}
-                cols_original = list(df.columns)  # Original columns
+                cols_original = list(df.columns)
 
                 for row_idx, record in enumerate(sheet_records):
-                    # Try to find identifier in various possible column names
-                    identifier = None
-                    for key in ["Identifier", "identifier", "Experiment Alias", "experiment_alias"]:
-                        if key in record:
-                            identifier = str(record.get(key, ""))
-                            break
+                    # Use same logic as validation panel - try "Sample Descriptor" first, then "sample_descriptor"
+                    sample_descriptor = str(record.get("Sample Descriptor", "") or record.get("sample_descriptor", ""))
 
-                    if not identifier:
-                        identifier = str(list(record.values())[0]) if record else ""
-
-                    # Normalize identifier for matching
-                    identifier_normalized = identifier.strip().lower() if identifier else ""
+                    # Normalize sample descriptor for matching (same as validation panel)
+                    identifier_normalized = sample_descriptor.strip().lower() if sample_descriptor else ""
 
                     # Get field-level errors/warnings for this identifier
                     field_data = identifier_to_field_errors.get(identifier_normalized, {})
@@ -1202,42 +1227,127 @@ def register_experiments_callbacks(app):
                     field_warnings = field_data.get("warnings", {})
 
                     # Map field errors/warnings to column indices for highlighting
+                    # Use the same logic as validation panel
                     if field_errors or field_warnings:
                         row_to_field_errors[row_idx] = {"errors": {}, "warnings": {}}
 
-                        # Map error fields to columns
+                        # Map error fields to columns - same logic as validation panel
                         for field, msgs in field_errors.items():
+                            lower_field = field.lower()
+                            
+                            # Special handling for Secondary Project: highlight ALL columns (same as validation panel)
+                            if "secondary project" in lower_field:
+                                # Find all Secondary Project columns
+                                secondary_project_cols = [c for c in cols_original if str(c).lower().startswith("secondary project")]
+                                if secondary_project_cols:
+                                    # Store for ALL Secondary Project columns
+                                    for sp_col in secondary_project_cols:
+                                        col_idx = cols_original.index(sp_col)
+                                        field_display = "Secondary Project"
+                                        if col_idx not in row_to_field_errors[row_idx]["errors"]:
+                                            row_to_field_errors[row_idx]["errors"][col_idx] = {
+                                                "field": field_display,
+                                                "messages": msgs
+                                            }
+                                        else:
+                                            # Merge messages if multiple errors
+                                            existing = row_to_field_errors[row_idx]["errors"][col_idx]["messages"]
+                                            if isinstance(existing, list):
+                                                existing.extend(msgs if isinstance(msgs, list) else [msgs])
+                                            else:
+                                                row_to_field_errors[row_idx]["errors"][col_idx]["messages"] = [existing] + (msgs if isinstance(msgs, list) else [msgs])
+                                continue  # Skip normal processing for Secondary Project
+                            
+                            # Normal processing for other fields
                             col = _map_field_to_column_excel(field, cols_original)
-                            if col and col in cols_original:
-                                col_idx = cols_original.index(col)
-                                # Store both messages and field name for tooltip
-                                row_to_field_errors[row_idx]["errors"][col_idx] = {
-                                    "field": field,
-                                    "messages": msgs
-                                }
+                            if col:
+                                # Try to find column by exact match first
+                                if col in cols_original:
+                                    col_idx = cols_original.index(col)
+                                else:
+                                    # Try case-insensitive match
+                                    col_idx = None
+                                    for i, c in enumerate(cols_original):
+                                        if str(c).lower() == str(col).lower():
+                                            col_idx = i
+                                            break
+                                
+                                if col_idx is not None:
+                                    # Store both messages and field name for tooltip
+                                    row_to_field_errors[row_idx]["errors"][col_idx] = {
+                                        "field": field,
+                                        "messages": msgs
+                                    }
 
-                        # Map warning fields to columns
+                        # Map warning fields to columns - same logic as validation panel
                         for field, msgs in field_warnings.items():
+                            lower_field = field.lower()
+                            
+                            # Special handling for Secondary Project: highlight ALL columns (same as validation panel)
+                            if "secondary project" in lower_field:
+                                # Find all Secondary Project columns
+                                secondary_project_cols = [c for c in cols_original if str(c).lower().startswith("secondary project")]
+                                if secondary_project_cols:
+                                    # Store for ALL Secondary Project columns
+                                    for sp_col in secondary_project_cols:
+                                        col_idx = cols_original.index(sp_col)
+                                        field_display = "Secondary Project"
+                                        if col_idx not in row_to_field_errors[row_idx]["warnings"]:
+                                            row_to_field_errors[row_idx]["warnings"][col_idx] = {
+                                                "field": field_display,
+                                                "messages": msgs
+                                            }
+                                        else:
+                                            # Merge messages if multiple warnings
+                                            existing = row_to_field_errors[row_idx]["warnings"][col_idx]["messages"]
+                                            if isinstance(existing, list):
+                                                existing.extend(msgs if isinstance(msgs, list) else [msgs])
+                                            else:
+                                                row_to_field_errors[row_idx]["warnings"][col_idx]["messages"] = [existing] + (msgs if isinstance(msgs, list) else [msgs])
+                                continue  # Skip normal processing for Secondary Project
+                            
+                            # Normal processing for other fields
                             col = _map_field_to_column_excel(field, cols_original)
-                            if col and col in cols_original:
-                                col_idx = cols_original.index(col)
-                                # Store both messages and field name for tooltip
-                                row_to_field_errors[row_idx]["warnings"][col_idx] = {
-                                    "field": field,
-                                    "messages": msgs
-                                }
+                            if col:
+                                # Try to find column by exact match first
+                                if col in cols_original:
+                                    col_idx = cols_original.index(col)
+                                else:
+                                    # Try case-insensitive match
+                                    col_idx = None
+                                    for i, c in enumerate(cols_original):
+                                        if str(c).lower() == str(col).lower():
+                                            col_idx = i
+                                            break
+                                
+                                if col_idx is not None:
+                                    # Store both messages and field name for tooltip
+                                    row_to_field_errors[row_idx]["warnings"][col_idx] = {
+                                        "field": field,
+                                        "messages": msgs
+                                    }
 
-                # Write to Excel
+                # Clean headers to match validation results table display
+                def clean_header_name(header):
+                    if '.' in header:
+                        return header.split('.')[0]
+                    return header
+
+                # Create a copy of the DataFrame with cleaned headers
+                df_cleaned = df.copy()
+                df_cleaned.columns = [clean_header_name(col) for col in df.columns]
+
+                # Write to Excel with cleaned headers
                 sheet_name_clean = sheet_name[:31]  # Excel sheet name limit
-                df.to_excel(writer, sheet_name=sheet_name_clean, index=False)
+                df_cleaned.to_excel(writer, sheet_name=sheet_name_clean, index=False)
 
-                # Get Excel formatting objects
+                # Get Excel formatting objects - matching validation table colors
                 book = writer.book
-                fmt_red = book.add_format({"bg_color": "#FFCCCC"})
-                fmt_yellow = book.add_format({"bg_color": "#FFF4CC"})
+                fmt_red = book.add_format({"bg_color": "#FFCCCC"})  # Matches #ffcccc from validation table
+                fmt_yellow = book.add_format({"bg_color": "#FFF4CC"})  # Matches #fff4cc from validation table
 
                 ws = writer.sheets[sheet_name_clean]
-                cols = list(df.columns)  # Original columns only
+                cols = list(df_cleaned.columns)  # Use cleaned column names
 
                 # Helper function to format messages for tooltip
                 def format_tooltip_message(field_name, msgs, is_warning=False):
@@ -1254,37 +1364,90 @@ def register_experiments_callbacks(app):
                     return formatted
 
                 # Highlight specific cells with errors/warnings and add tooltips
+                # Errors take precedence over warnings (red highlighting if both exist)
                 for row_idx, record in enumerate(sheet_records):
-                    excel_row = row_idx + 1  # Excel is 1-indexed
+                    excel_row = row_idx + 1  # Excel is 1-indexed (header is row 0, data starts at row 1)
 
                     if row_idx in row_to_field_errors:
                         field_data = row_to_field_errors[row_idx]
+                        
+                        # Get all columns that have errors or warnings
+                        all_affected_cols = set()
+                        all_affected_cols.update(field_data.get("errors", {}).keys())
+                        all_affected_cols.update(field_data.get("warnings", {}).keys())
 
-                        # Highlight error cells (red) - use original column indices
-                        for col_idx, error_data in field_data.get("errors", {}).items():
-                            if col_idx < len(cols_original):
-                                cell_value = df.iat[row_idx, col_idx] if row_idx < len(df) else ""
-                                ws.write(excel_row, col_idx, cell_value, fmt_red)
-                                # Add tooltip/comment with error message
+                        for col_idx in all_affected_cols:
+                            # Use cols_original for bounds check since row_to_field_errors uses cols_original indices
+                            if col_idx >= len(cols_original) or col_idx < 0:
+                                continue
+                            
+                            # Get cell value from the cleaned DataFrame
+                            # Note: col_idx should be the same for both original and cleaned since they have same structure
+                            try:
+                                if row_idx < len(df_cleaned) and col_idx < len(df_cleaned.columns):
+                                    cell_value = df_cleaned.iloc[row_idx, col_idx]
+                                    # Handle NaN values
+                                    if pd.isna(cell_value):
+                                        cell_value = ""
+                                else:
+                                    cell_value = ""
+                            except Exception:
+                                cell_value = ""
+                            
+                            # Check if this cell has errors (errors take precedence)
+                            has_errors = col_idx in field_data.get("errors", {})
+                            has_warnings = col_idx in field_data.get("warnings", {})
+                            
+                            if not (has_errors or has_warnings):
+                                continue
+                            
+                            # Combine tooltip messages from both errors and warnings
+                            tooltip_parts = []
+                            
+                            if has_errors:
+                                error_data = field_data["errors"][col_idx]
                                 field_name = error_data.get("field",
                                                             cols_original[col_idx] if col_idx < len(cols_original) else "")
                                 msgs = error_data.get("messages", [])
-                                tooltip_text = format_tooltip_message(field_name, msgs, is_warning=False)
-                                ws.write_comment(excel_row, col_idx, tooltip_text,
-                                                 {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
-
-                        # Highlight warning cells (yellow) - use original column indices
-                        for col_idx, warning_data in field_data.get("warnings", {}).items():
-                            if col_idx < len(cols_original):
-                                cell_value = df.iat[row_idx, col_idx] if row_idx < len(df) else ""
-                                ws.write(excel_row, col_idx, cell_value, fmt_yellow)
-                                # Add tooltip/comment with warning message
-                                field_name = warning_data.get("field", cols_original[col_idx] if col_idx < len(
-                                    cols_original) else "")
+                                msgs_list = msgs if isinstance(msgs, list) else [msgs]
+                                for msg in msgs_list:
+                                    tooltip_parts.append(f"Error - {field_name}: {msg}")
+                                # Highlight in red (errors take precedence) - overwrite cell with formatting
+                                ws.write(excel_row, col_idx, cell_value, fmt_red)
+                            elif has_warnings:
+                                warning_data = field_data["warnings"][col_idx]
+                                field_name = warning_data.get("field",
+                                                              cols_original[col_idx] if col_idx < len(cols_original) else "")
                                 msgs = warning_data.get("messages", [])
-                                tooltip_text = format_tooltip_message(field_name, msgs, is_warning=True)
-                                ws.write_comment(excel_row, col_idx, tooltip_text,
-                                                 {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
+                                msgs_list = msgs if isinstance(msgs, list) else [msgs]
+                                for msg in msgs_list:
+                                    tooltip_parts.append(f"Warning - {field_name}: {msg}")
+                                # Highlight in yellow (only warnings, no errors) - overwrite cell with formatting
+                                ws.write(excel_row, col_idx, cell_value, fmt_yellow)
+                            
+                            # Add warnings to tooltip even if cell is highlighted red (errors take precedence)
+                            if has_errors and has_warnings:
+                                warning_data = field_data["warnings"][col_idx]
+                                field_name = warning_data.get("field",
+                                                              cols_original[col_idx] if col_idx < len(cols_original) else "")
+                                msgs = warning_data.get("messages", [])
+                                msgs_list = msgs if isinstance(msgs, list) else [msgs]
+                                for msg in msgs_list:
+                                    tooltip_parts.append(f"Warning - {field_name}: {msg}")
+                            
+                            # Add combined tooltip
+                            if tooltip_parts:
+                                tooltip_text = "\n".join([f"• {part}" for part in tooltip_parts])
+                                # Truncate if too long
+                                max_length = 2000
+                                if len(tooltip_text) > max_length:
+                                    tooltip_text = tooltip_text[:max_length] + "..."
+                                try:
+                                    ws.write_comment(excel_row, col_idx, tooltip_text,
+                                                     {"visible": False, "x_scale": 1.5, "y_scale": 1.8})
+                                except Exception:
+                                    # If comment fails, continue without it
+                                    pass
 
         buffer.seek(0)
         return dcc.send_bytes(buffer.getvalue(), "annotated_template_experiments.xlsx")
@@ -1310,8 +1473,9 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
 
     sheet_sample_names = set()
     for record in sheet_records:
-        identifier = str(record.get("Identifier", "") or record.get("identifier", "") )
-        sheet_sample_names.add(identifier)
+        sample_descriptor = str(record.get("Sample Descriptor", "") or record.get("sample_descriptor", ""))
+        if sample_descriptor:
+            sheet_sample_names.add(sample_descriptor)
 
 
     # Collect all rows that belong to this sheet
@@ -1320,63 +1484,20 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
 
     for experiment_type in experiment_types:
         et_data = results_by_type.get(experiment_type, {}) or {}
-        et_key = experiment_type.replace(' ', '_')
-        invalid_key = f"invalid_{et_key}s"
-        if invalid_key.endswith('ss'):
-            invalid_key = invalid_key[:-1]
-        valid_key = f"valid_{et_key}s"
+        invalid_key = "invalid"
+        valid_key = "valid"
 
         invalid_records = et_data.get(invalid_key, [])
         valid_records = et_data.get(valid_key, [])
 
         for record in invalid_records + valid_records:
-            sample_descriptor =  record.get("identifier", "") or record.get("Identifier", "") or record.get("Sample Descriptor", "") or record.get("sample_descriptor", "")
+            sample_descriptor = record.get("sample_descriptor", "")
             if sample_descriptor in sheet_sample_names:
                 errors, warnings = get_all_errors_and_warnings(record)
                 if errors:
-                    # Merge errors if sample_descriptor already exists in error_map
-                    if sample_descriptor in error_map:
-                        # Merge the error dictionaries
-                        for field, msgs in errors.items():
-                            if field in error_map[sample_descriptor]:
-                                # Merge messages if field already exists
-                                existing_msgs = error_map[sample_descriptor][field]
-                                if isinstance(existing_msgs, list):
-                                    if isinstance(msgs, list):
-                                        error_map[sample_descriptor][field] = existing_msgs + msgs
-                                    else:
-                                        error_map[sample_descriptor][field] = existing_msgs + [msgs]
-                                else:
-                                    if isinstance(msgs, list):
-                                        error_map[sample_descriptor][field] = [existing_msgs] + msgs
-                                    else:
-                                        error_map[sample_descriptor][field] = [existing_msgs, msgs]
-                            else:
-                                error_map[sample_descriptor][field] = msgs
-                    else:
-                        error_map[sample_descriptor] = errors
+                    error_map[sample_descriptor] = errors
                 if warnings:
-                    # Merge warnings if sample_descriptor already exists in warning_map
-                    if sample_descriptor in warning_map:
-                        # Merge the warning dictionaries
-                        for field, msgs in warnings.items():
-                            if field in warning_map[sample_descriptor]:
-                                # Merge messages if field already exists
-                                existing_msgs = warning_map[sample_descriptor][field]
-                                if isinstance(existing_msgs, list):
-                                    if isinstance(msgs, list):
-                                        warning_map[sample_descriptor][field] = existing_msgs + msgs
-                                    else:
-                                        warning_map[sample_descriptor][field] = existing_msgs + [msgs]
-                                else:
-                                    if isinstance(msgs, list):
-                                        warning_map[sample_descriptor][field] = [existing_msgs] + msgs
-                                    else:
-                                        warning_map[sample_descriptor][field] = [existing_msgs, msgs]
-                            else:
-                                warning_map[sample_descriptor][field] = msgs
-                    else:
-                        warning_map[sample_descriptor] = warnings
+                    warning_map[sample_descriptor] = warnings
 
     # Create DataFrame from sheet records
     df_all = pd.DataFrame(sheet_records)
@@ -1471,6 +1592,49 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
                     if "Cell Type" in col_str and "Term Source ID" not in col_str:
                         return col
         
+        # Handle Secondary Project fields - check if field starts with "Secondary Project"
+        if field_name and "secondary project" in field_name.lower():
+            # Extract index from field name if present (e.g., "Secondary Project.0" -> 0, "Secondary Project.1" -> 1)
+            field_index = None
+            field_lower = field_name.lower()
+            if "." in field_lower:
+                parts = field_lower.split(".", 1)
+                if len(parts) > 1 and parts[1].isdigit():
+                    field_index = int(parts[1])
+            
+            # Collect all Secondary Project columns in order
+            secondary_project_cols = []
+            for col in columns:
+                col_str = str(col)
+                col_lower = col_str.lower()
+                # Match exact "Secondary Project" or numbered versions like "Secondary Project.0", "Secondary Project.1"
+                if col_lower == "secondary project" or col_lower.startswith("secondary project."):
+                    secondary_project_cols.append(col)
+            
+            if secondary_project_cols:
+                # If field has a specific index (e.g., "Secondary Project.0"), try to match that index
+                if field_index is not None and 0 <= field_index < len(secondary_project_cols):
+                    # Try to find column with matching index first
+                    for col in secondary_project_cols:
+                        col_str = str(col)
+                        col_lower = col_str.lower()
+                        if "." in col_lower:
+                            col_parts = col_lower.split(".", 1)
+                            if len(col_parts) > 1 and col_parts[1].isdigit():
+                                if int(col_parts[1]) == field_index:
+                                    return col
+                    # If no exact index match, return the column at that position
+                    return secondary_project_cols[field_index]
+                else:
+                    # No specific index in field name, or index out of range - return first Secondary Project column
+                    return secondary_project_cols[0]
+            
+            # Fallback: try any column that starts with "Secondary Project" (case insensitive)
+            for col in columns:
+                col_str = str(col)
+                if col_str.lower().startswith("secondary project"):
+                    return col
+        
         # Handle Term Source ID fields - check if field starts with "Term Source ID"
         if field_name and field_name.lower().startswith("term source id"):
             # Find the first "Term Source ID" column (without numbered suffix first, then with suffix)
@@ -1528,209 +1692,110 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
     tooltip_data = []
 
     for i, row in df_all.iterrows():
-        # Try to match by Identifier or Sample Descriptor
-        identifier = str(row.get("Identifier", "") or row.get("identifier", "") or row.get("Sample Descriptor", "") or row.get("sample_descriptor", ""))
-
-        match_key = identifier
-        
+        # Use Sample Descriptor to match error_map keys (same as used when building error_map)
+        sample_descriptor = str(row.get("Sample Descriptor", "") or row.get("sample_descriptor", ""))
         tips = {}
         row_styles = []
 
-        # Try exact match first
-        field_errors = {}
-        if match_key in error_map:
-            field_errors = error_map[match_key] or {}
-        else:
-            # Try case-insensitive match
-            match_key_lower = match_key.lower() if match_key else ""
-            for key in error_map.keys():
-                if str(key).strip().lower() == match_key_lower:
-                    field_errors = error_map[key] or {}
-                    break
-        
-        # Process errors if any found
-        if field_errors:
+        if sample_descriptor in error_map:
+            field_errors = error_map[sample_descriptor] or {}
             for field, msgs in field_errors.items():
                 msgs_list = _as_list(msgs)
                 lower_msgs = [m.lower() for m in msgs_list]
                 lower_field = field.lower()
                 
-                # Check if error messages or field name mention "Health Status", "Cell Type", or "Term Source ID"
-                # and map to those columns even if field name doesn't match exactly
-                col = None
-                if "health status" in lower_field or any("health status" in lm for lm in lower_msgs):
-                    col = _map_field_to_column("Health Status", df_all.columns)
-                elif "cell type" in lower_field or any("cell type" in lm for lm in lower_msgs):
-                    col = _map_field_to_column("Cell Type", df_all.columns)
-                elif lower_field.startswith("term source id") or any(lm.startswith("term source id") for lm in lower_msgs):
-                    # Map to first Term Source ID column
-                    col = _map_field_to_column("Term Source ID", df_all.columns)
+                # Special handling for Secondary Project: highlight ALL columns
+                if "secondary project" in lower_field:
+                    # Find all Secondary Project columns
+                    secondary_project_cols = [c for c in df_all.columns if str(c).lower().startswith("secondary project")]
+                    if secondary_project_cols:
+                        # Apply red background to ALL Secondary Project columns
+                        for sp_col in secondary_project_cols:
+                            row_styles.append({'if': {'row_index': i, 'column_id': sp_col}, 'backgroundColor': '#ffcccc'})
+                        # Add tooltip to first column
+                        field_display = "Secondary Project"
+                        msg_text = "**Error**: " + field_display + " — " + " | ".join(msgs_list)
+                        if secondary_project_cols[0] in tips:
+                            existing = tips[secondary_project_cols[0]].get("value", "")
+                            combined = f"{existing} | {msg_text}" if existing else msg_text
+                        else:
+                            combined = msg_text
+                        tips[secondary_project_cols[0]] = {'value': combined, 'type': 'markdown'}
+                        continue  # Skip normal processing for Secondary Project
                 
-                # If not found via message check, use normal mapping (this will handle "Secondary Project.0" etc.)
+                # Normal processing for other fields
+                col = _map_field_to_column(field, df_all.columns)
                 if not col:
-                    col = _map_field_to_column(field, df_all.columns)
-                
-                # If still not found, try to extract base name from dot notation
-                if not col and "." in field:
-                    base_field = field.split(".", 1)[0]
-                    col = _map_field_to_column(base_field, df_all.columns)
-                
-                # Last resort: use field name as-is (but this should rarely happen)
-                if not col:
-                    col = field
+                    col = field  # Use field name if no column found
 
                 col_id = None
-                # First try exact match
                 if col in df_all.columns:
                     col_id = col
                 else:
-                    # Try case-insensitive match and partial match
                     col_str = str(col)
-                    col_lower = col_str.lower().strip()
                     for df_col in df_all.columns:
-                        df_col_str = str(df_col).strip()
-                        df_col_lower = df_col_str.lower()
-                        
-                        # Exact match (case-insensitive)
-                        if df_col_lower == col_lower:
+                        if str(df_col) == col_str:
                             col_id = df_col
                             break
-                        
-                        # Check if column name equals base name (for fields like "Secondary Project.0" matching "Secondary Project")
-                        if "." in df_col_str:
-                            df_col_base = df_col_str.split(".", 1)[0].strip().lower()
-                            if df_col_base == col_lower:
-                                col_id = df_col
-                                break
-                        
-                        # Check if column name starts with the field name (for numbered columns like "Secondary Project.1")
-                        if df_col_lower.startswith(col_lower + "."):
-                            # Check if what follows is a number
-                            remainder = df_col_lower[len(col_lower)+1:]
-                            if remainder and (remainder.split('.')[0].isdigit() or remainder.split('.')[0] == ''):
-                                col_id = df_col
-                                break
-                
                 if not col_id:
-                    # Debug: print what we're looking for vs what's available (only for first few to avoid spam)
-                    if i < 3:
-                        print(f"DEBUG Experiments: Could not find column '{col}' for field '{field}'. Available columns: {list(df_all.columns)[:15]}")
                     continue
 
                 is_extra = any("extra inputs are not permitted" in lm for lm in lower_msgs)
                 is_warning_like = any("warning" in lm for lm in lower_msgs)
-                
-                # Format error message for tooltip
-                # Use markdown format with bold error label
-                if is_extra or is_warning_like:
-                    prefix = "**Warning**: "
-                    bg_color = '#fff4cc'  # Yellow for warnings
-                else:
-                    prefix = "**Error**: "
-                    bg_color = '#ffcccc'  # Red for errors
-                
-                # Format the message - show field name and error messages
-                # Clean field name for display (remove .0, .1, etc.)
-                field_display = field
-                if '.' in field:
-                    # Remove numbered suffixes like .0, .1, .2, etc.
-                    parts = field.split('.')
-                    if len(parts) > 1 and parts[-1].isdigit():
-                        field_display = '.'.join(parts[:-1])
-                
-                # Escape any special characters that might break markdown
-                msg_text = prefix + field_display + " — " + " | ".join(msgs_list)
-                
-                # Combine with existing tooltip if column already has one
-                # Use pipe separator like in analysis tab for consistency
+                prefix = "**Warning**: " if (is_extra or is_warning_like) else "**Error**: "
+                msg_text = prefix + field + " — " + " | ".join(msgs_list)
                 if col_id in tips:
                     existing = tips[col_id].get("value", "")
                     combined = f"{existing} | {msg_text}" if existing else msg_text
                 else:
                     combined = msg_text
-                
-                # Apply styling and tooltip
-                row_styles.append({'if': {'row_index': i, 'column_id': col_id}, 'backgroundColor': bg_color})
-                tips[col_id] = {'value': combined, 'type': 'markdown'}
+                if is_extra or is_warning_like:
+                    row_styles.append({'if': {'row_index': i, 'column_id': col_id}, 'backgroundColor': '#fff4cc'})
+                    tips[col_id] = {'value': combined, 'type': 'markdown'}
+                else:
+                    row_styles.append({'if': {'row_index': i, 'column_id': col_id}, 'backgroundColor': '#ffcccc'})
+                    tips[col_id] = {'value': combined, 'type': 'markdown'}
 
-        # Try exact match first for warnings
-        field_warnings = {}
-        if match_key in warning_map:
-            field_warnings = warning_map[match_key] or {}
-        else:
-            # Try case-insensitive match
-            match_key_lower = match_key.lower() if match_key else ""
-            for key in warning_map.keys():
-                if str(key).strip().lower() == match_key_lower:
-                    field_warnings = warning_map[key] or {}
-                    break
-        
-        if field_warnings:
+        if sample_descriptor in warning_map:
+            field_warnings = warning_map[sample_descriptor] or {}
             for field, msgs in field_warnings.items():
                 msgs_list = _as_list(msgs)
-                lower_msgs = [m.lower() for m in msgs_list]
                 lower_field = field.lower()
                 
-                # Check if warning messages or field name mention "Health Status", "Cell Type", or "Term Source ID"
-                # and map to those columns even if field name doesn't match exactly
-                col = None
-                if "health status" in lower_field or any("health status" in lm for lm in lower_msgs):
-                    col = _map_field_to_column("Health Status", df_all.columns)
-                elif "cell type" in lower_field or any("cell type" in lm for lm in lower_msgs):
-                    col = _map_field_to_column("Cell Type", df_all.columns)
-                elif lower_field.startswith("term source id") or any(lm.startswith("term source id") for lm in lower_msgs):
-                    # Map to first Term Source ID column
-                    col = _map_field_to_column("Term Source ID", df_all.columns)
+                # Special handling for Secondary Project: highlight ALL columns with yellow
+                if "secondary project" in lower_field:
+                    # Find all Secondary Project columns
+                    secondary_project_cols = [c for c in df_all.columns if str(c).lower().startswith("secondary project")]
+                    if secondary_project_cols:
+                        # Apply yellow background to ALL Secondary Project columns
+                        for sp_col in secondary_project_cols:
+                            row_styles.append({'if': {'row_index': i, 'column_id': sp_col}, 'backgroundColor': '#fff4cc'})
+                        # Add tooltip to first column
+                        field_display = "Secondary Project"
+                        warn_text = "**Warning**: " + field_display + " — " + " | ".join(msgs_list)
+                        if secondary_project_cols[0] in tips:
+                            existing = tips[secondary_project_cols[0]].get("value", "")
+                            combined = f"{existing} | {warn_text}" if existing else warn_text
+                        else:
+                            combined = warn_text
+                        tips[secondary_project_cols[0]] = {'value': combined, 'type': 'markdown'}
+                        continue  # Skip normal processing for Secondary Project
                 
-                # If not found via message check, use normal mapping (this will handle "Secondary Project.0" etc.)
+                # Normal processing for other fields
+                col = _map_field_to_column(field, df_all.columns)
                 if not col:
-                    col = _map_field_to_column(field, df_all.columns)
-                
-                # If still not found, try to extract base name from dot notation
-                if not col and "." in field:
-                    base_field = field.split(".", 1)[0]
-                    col = _map_field_to_column(base_field, df_all.columns)
-                
-                # Last resort: use field name as-is (but this should rarely happen)
-                if not col:
-                    col = field
+                    col = field  # Use field name if no column found
 
                 col_id = None
-                # First try exact match
                 if col in df_all.columns:
                     col_id = col
                 else:
-                    # Try case-insensitive match and partial match
                     col_str = str(col)
-                    col_lower = col_str.lower().strip()
                     for df_col in df_all.columns:
-                        df_col_str = str(df_col).strip()
-                        df_col_lower = df_col_str.lower()
-                        
-                        # Exact match (case-insensitive)
-                        if df_col_lower == col_lower:
+                        if str(df_col) == col_str:
                             col_id = df_col
                             break
-                        
-                        # Check if column name equals base name (for fields like "Secondary Project.0" matching "Secondary Project")
-                        if "." in df_col_str:
-                            df_col_base = df_col_str.split(".", 1)[0].strip().lower()
-                            if df_col_base == col_lower:
-                                col_id = df_col
-                                break
-                        
-                        # Check if column name starts with the field name (for numbered columns like "Secondary Project.1")
-                        if df_col_lower.startswith(col_lower + "."):
-                            # Check if what follows is a number
-                            remainder = df_col_lower[len(col_lower)+1:]
-                            if remainder and (remainder.split('.')[0].isdigit() or remainder.split('.')[0] == ''):
-                                col_id = df_col
-                                break
-                
                 if not col_id:
-                    # Debug: print what we're looking for vs what's available (only for first few to avoid spam)
-                    if i < 3:
-                        print(f"DEBUG Experiments: Could not find column '{col}' for field '{field}'. Available columns: {list(df_all.columns)[:15]}")
                     continue
                 warn_text = "**Warning**: " + (field if field else 'General') + " — " + " | ".join(msgs_list)
                 if col_id in tips:
@@ -1743,30 +1808,6 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
 
         cell_styles.extend(row_styles)
         tooltip_data.append(tips)
-
-    # Ensure tooltip_data has the same length as the number of rows
-    # Also ensure all entries are dictionaries (not None or other types)
-    while len(tooltip_data) < len(df_all):
-        tooltip_data.append({})
-    tooltip_data = tooltip_data[:len(df_all)]
-    
-    # Clean tooltip_data to ensure all values are valid dictionaries
-    for i, tip_dict in enumerate(tooltip_data):
-        if not isinstance(tip_dict, dict):
-            tooltip_data[i] = {}
-        else:
-            # Ensure all tooltip values are properly formatted dictionaries
-            cleaned_dict = {}
-            for col_id, tip_value in tip_dict.items():
-                if isinstance(tip_value, dict):
-                    # Already a dict, just ensure value is a string if present
-                    if 'value' in tip_value and tip_value.get('value'):
-                        cleaned_dict[col_id] = {
-                            'value': str(tip_value['value']),
-                            'type': tip_value.get('type', 'markdown')
-                        }
-                # If tip_value is not a dict, skip it (shouldn't happen with our code)
-            tooltip_data[i] = cleaned_dict
 
     def clean_header_name(header):
         if '.' in header:
@@ -1915,13 +1956,22 @@ def _calculate_sheet_statistics_experiments(validation_results, all_sheets_data)
 
     validation_data = validation_results['results']
     results_by_type = validation_data.get('experiment_results', {}) or {}
-    experiment_types = validation_data.get('experiment_types_processed', []) or []
+    experiment_types_processed = validation_data.get('experiment_types_processed', []) or []
 
-    # Initialize sheet stats
-    if all_sheets_data:
-        for sheet_name in all_sheets_data.keys():
+    # OPTIMIZATION: Only initialize and process sheets that were actually processed by backend
+    # Filter all_sheets_data to only include sheets in experiment_types_processed
+    filtered_sheets_data = {}
+    if all_sheets_data and experiment_types_processed:
+        filtered_sheets_data = {k: v for k, v in all_sheets_data.items() if k in experiment_types_processed}
+    elif all_sheets_data:
+        # Fallback: if no experiment_types_processed, use all sheets (backward compatibility)
+        filtered_sheets_data = all_sheets_data
+
+    # Initialize sheet stats only for processed sheets
+    if filtered_sheets_data:
+        for sheet_name in filtered_sheets_data.keys():
             sheet_stats[sheet_name] = {
-                'total_records': len(all_sheets_data[sheet_name]) if all_sheets_data[sheet_name] else 0,
+                'total_records': len(filtered_sheets_data[sheet_name]) if filtered_sheets_data[sheet_name] else 0,
                 'valid_records': 0,
                 'error_records': 0,
                 'warning_records': 0,
@@ -1929,7 +1979,7 @@ def _calculate_sheet_statistics_experiments(validation_results, all_sheets_data)
             }
 
     # Process each experiment type and map to sheets
-    for experiment_type in experiment_types:
+    for experiment_type in experiment_types_processed:
         et_data = results_by_type.get(experiment_type, {}) or {}
 
         invalid_key = "invalid"
@@ -1941,7 +1991,7 @@ def _calculate_sheet_statistics_experiments(validation_results, all_sheets_data)
         all_records = invalid_records + valid_records
 
         for record in all_records:
-            sample_descriptor = record.get("identifier", "") or record.get("Identifier", "") or record.get("Sample Descriptor", "") or record.get("sample_descriptor", "")
+            sample_descriptor = record.get("Sample Descriptor", "") or record.get("sample_descriptor", "")
             if not sample_descriptor:
                 continue
 
@@ -1949,12 +1999,13 @@ def _calculate_sheet_statistics_experiments(validation_results, all_sheets_data)
 
             # Find which sheet contains this sample
             # For experiments, try "Identifier" first, then "Sample Descriptor"
-            for sheet_name, sheet_records in (all_sheets_data or {}).items():
+            # OPTIMIZATION: Only iterate over sheets that were processed by backend
+            for sheet_name, sheet_records in (filtered_sheets_data or {}).items():
                 if not sheet_records:
                     continue
                 sheet_sample_names = set()
                 for r in sheet_records:
-                    identifier = str(r.get("Identifier", "") or r.get("identifier", ""))
+                    identifier = str(r.get("Sample Descriptor", "") or r.get("sample_descriptor", ""))
 
                     if identifier:
                         sheet_sample_names.add(identifier)
