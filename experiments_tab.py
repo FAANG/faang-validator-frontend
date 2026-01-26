@@ -86,7 +86,7 @@ def create_experiments():
 
 # Backend API URL - can be configured via environment variable
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
-                                 'https://faang-validator-backend-service-964531885708.europe-west2.run.app')
+                                 'http://localhost:8000')
 
 
 def get_all_errors_and_warnings(record):
@@ -529,9 +529,10 @@ def register_experiments_callbacks(app):
         State("experiments-password-ena", "value"),
         State("biosamples-action-experiments", "value"),
         State("stored-json-validation-results-experiments", "data"),
+        State("stored-parsed-json-experiments", "data"),
         prevent_initial_call=True,
     )
-    def _submit_experiments(n, username, password, action, v):
+    def _submit_experiments(n, username, password, action, v, original_data):
         """Submit to experiments for Experiments tab"""
         if not n:
             raise PreventUpdate
@@ -561,7 +562,8 @@ def register_experiments_callbacks(app):
         validation_results = v["results"]
 
         body = {
-            "data": validation_results,
+            "validation_results": validation_results,
+            "original_data": original_data,
             "webin_username": username,
             "webin_password": password,
             "mode": "test",  # Default to test server
