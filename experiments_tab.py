@@ -86,7 +86,7 @@ def create_experiments():
 
 # Backend API URL - can be configured via environment variable
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
-                                 'http://localhost:8000')
+                                 'https://faang-validator-backend-service-964531885708.europe-west2.run.app')
 
 
 def get_all_errors_and_warnings(record):
@@ -934,7 +934,7 @@ def register_experiments_callbacks(app):
 
         if not all_sheets_data:
             raise PreventUpdate
-        
+
         # Use all sheets from all_sheets_data, not just sheet_names
         # This ensures all sheets (including empty ones) are included in the download
         all_sheet_names = list(all_sheets_data.keys())
@@ -948,7 +948,7 @@ def register_experiments_callbacks(app):
         def _map_field_to_column_excel(field_name, columns):
             if not field_name:
                 return None
-            
+
             # Handle Health Status fields (with or without .term) - same as validation panel
             if "Health Status" in field_name:
                 if ".term" in field_name:
@@ -987,7 +987,7 @@ def register_experiments_callbacks(app):
                         col_str = str(col)
                         if "Health Status" in col_str and "Term Source ID" not in col_str:
                             return col
-            
+
             # Handle Cell Type fields (with or without .term) - same as validation panel
             if "Cell Type" in field_name:
                 if ".term" in field_name:
@@ -1026,7 +1026,7 @@ def register_experiments_callbacks(app):
                         col_str = str(col)
                         if "Cell Type" in col_str and "Term Source ID" not in col_str:
                             return col
-            
+
             # Handle Secondary Project fields - same as validation panel
             if field_name and "secondary project" in field_name.lower():
                 # Extract index from field name if present (e.g., "Secondary Project.0" -> 0, "Secondary Project.1" -> 1)
@@ -1036,7 +1036,7 @@ def register_experiments_callbacks(app):
                     parts = field_lower.split(".", 1)
                     if len(parts) > 1 and parts[1].isdigit():
                         field_index = int(parts[1])
-                
+
                 # Collect all Secondary Project columns in order
                 secondary_project_cols = []
                 for col in columns:
@@ -1045,7 +1045,7 @@ def register_experiments_callbacks(app):
                     # Match exact "Secondary Project" or numbered versions like "Secondary Project.0", "Secondary Project.1"
                     if col_lower == "secondary project" or col_lower.startswith("secondary project."):
                         secondary_project_cols.append(col)
-                
+
                 if secondary_project_cols:
                     # If field has a specific index (e.g., "Secondary Project.0"), try to match that index
                     if field_index is not None and 0 <= field_index < len(secondary_project_cols):
