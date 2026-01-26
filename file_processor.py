@@ -92,8 +92,6 @@ def build_json_data(headers: List[str], rows: List[List[str]], sheet_name: str =
             record["Specimen Picture URL"] = []
         if has_derived_from:
             record["Derived From"] = []
-        if has_chip_target:
-            record["Chip Target"] = {}
         if has_experiment_type:
             record["Experiment Type"] = []
         if has_platform:
@@ -179,25 +177,24 @@ def build_json_data(headers: List[str], rows: List[List[str]], sheet_name: str =
                 i += 1
                 continue
 
-            # Special handling for chip target (experiment field)
-            elif has_chip_target and col.startswith("Chip Target"):
-                # Check next column for Term Source ID or Term
+            # Special handling for experiment target (experiment field) - flattened format
+            elif has_experiment_target and col.startswith("Experiment Target"):
+                # Set the main field value
+                record["Experiment Target"] = val
+                # Check next column for Term Source ID
                 if i + 1 < len(headers) and ("Term Source ID" in headers[i + 1] or "Term" in headers[i + 1]):
                     term_val = row[i + 1] if i + 1 < len(row) else ""
-                    record["Chip Target"] = {
-                        "text": val,
-                        "term": term_val
-                    }
+                    record["Term Source ID"] = term_val
                     i += 2
                 else:
-                    # If only text is provided, set term to empty
-                    if val:
-                        record["Chip Target"] = {
-                            "text": val,
-                            "term": ""
-                        }
                     i += 1
                 continue
+
+            # Skip "Term Source ID" if it's already processed as part of experiment target
+            elif col == "Term Source ID" and "Experiment Target" in record:
+                i += 1
+                continue
+
             # Special handling for experiment type (analysis field - array of objects)
             elif has_experiment_type and col.startswith("experiment type"):
                 if val:  # Only append non-empty values
@@ -294,17 +291,17 @@ def build_json_data(headers: List[str], rows: List[List[str]], sheet_name: str =
 def read_and_convert_excel(contents: str) -> Dict[str, Any]:
     """
     Read an Excel file from base64-encoded contents and convert it to structured data.
-    
+
     Args:
         contents: Base64-encoded file contents (with data URI prefix)
-        
+
     Returns:
         Dictionary containing:
         - all_sheets_data: Dict mapping sheet names to list of records (dicts)
         - parsed_json_data: Dict mapping sheet names to list of JSON records
         - sheet_names: List of sheet names that contain data
         - active_sheet: Name of the first sheet with data (or None)
-        
+
     Raises:
         Exception: If file cannot be read or processed
     """
@@ -315,10 +312,10 @@ def read_and_convert_excel(contents: str) -> Dict[str, Any]:
             'sheet_names': [],
             'active_sheet': None
         }
-    
+
     # Parse base64 string
     content_type, content_string = contents.split(',')
-    
+
     # Decode base64 string to bytes
     decoded = base64.b64decode(content_string)
     excel_file = pd.ExcelFile(io.BytesIO(decoded), engine="openpyxl")
@@ -360,4 +357,3 @@ def read_and_convert_excel(contents: str) -> Dict[str, Any]:
         'sheet_names': sheet_names,
         'active_sheet': active_sheet
     }
-
