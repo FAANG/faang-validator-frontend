@@ -568,7 +568,7 @@ def register_experiments_callbacks(app):
             "webin_username": username,
             "webin_password": password,
             "mode": "test",  # Default to test server
-            "update_existing": action == "submission",
+            "action": action,
         }
 
         try:

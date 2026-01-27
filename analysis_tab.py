@@ -541,10 +541,12 @@ def register_analysis_callbacks(app):
         Input("biosamples-submit-btn-ena-analysis", "n_clicks"),
         State("biosamples-username-ena-analysis", "value"),
         State("biosamples-password-ena-analysis", "value"),
+        State("biosamples-action-analysis", "value"),
         State("stored-json-validation-results-analysis", "data"),
+        State("stored-parsed-json-analysis", "data"),
         prevent_initial_call=True,
     )
-    def _submit_to_biosamples_analysis(n, username, password, v):
+    def _submit_to_biosamples_analysis(n, username, password, action, v, original_data):
         """Submit to BioSamples for Analysis tab"""
         if not n:
             raise PreventUpdate
@@ -573,19 +575,17 @@ def register_analysis_callbacks(app):
 
         validation_results = v["results"]
 
-        # Default values since components are not in layout
-        env = "test"  # Default to test environment
-        action = None  # Default to not updating existing
-
         body = {
-            "data": validation_results,
+            "validation_results": validation_results,
+            "original_data": original_data,
             "webin_username": username,
             "webin_password": password,
-            "mode": env or "test",
+            "mode": "test",
+            "action": action,
         }
 
         try:
-            url = "http://localhost:8000/submit-analysis"
+            url = f"{BACKEND_API_URL}/submit-analysis"
             r = requests.post(url, json=body, timeout=600)
 
             if not r.ok:

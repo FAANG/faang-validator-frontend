@@ -196,16 +196,16 @@ def build_json_data(headers: List[str], rows: List[List[str]], sheet_name: str =
                 continue
 
             # Special handling for experiment type (analysis field - array of objects)
-            elif has_experiment_type and col.startswith("experiment type"):
+            elif has_experiment_type and col.startswith("Experiment Type"):
                 if val:  # Only append non-empty values
-                    record["experiment type"].append({"value": val})
+                    record["Experiment Type"].append(val)
                 i += 1
                 continue
 
             # Special handling for platform (analysis field - array of objects)
-            elif has_platform and col.startswith("platform"):
+            elif has_platform and col.startswith("Platform"):
                 if val:  # Only append non-empty values
-                    record["platform"].append({"value": val})
+                    record["Platform"].append(val)
                 i += 1
                 continue
 
