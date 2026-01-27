@@ -279,7 +279,8 @@ def register_experiments_callbacks(app):
         [Output('output-data-upload-experiments', 'children', allow_duplicate=True),
          Output('stored-json-validation-results-experiments', 'data'),
          Output('stored-all-sheets-data-experiments', 'data', allow_duplicate=True),
-         Output('stored-sheet-names-experiments', 'data', allow_duplicate=True)],
+         Output('stored-sheet-names-experiments', 'data', allow_duplicate=True),
+         Output('stored-parsed-json-experiments', 'data', allow_duplicate=True)],
         [Input('validate-button-experiments', 'n_clicks')],
         [State('stored-file-data-experiments', 'data'),
          State('stored-filename-experiments', 'data'),
@@ -294,7 +295,7 @@ def register_experiments_callbacks(app):
         """
         global json_validation_results
         if n_clicks is None or contents is None:
-            return current_children or html.Div([]), None, None, None
+            return current_children or html.Div([]), None, None, None, None
 
         def create_output(components):
             if current_children is None:
@@ -308,7 +309,7 @@ def register_experiments_callbacks(app):
             content_type, content_string = contents.split(',', 1)
             decoded = base64.b64decode(content_string)
             excel_file = pd.ExcelFile(io.BytesIO(decoded), engine="openpyxl")
-            
+
             sheet_names = excel_file.sheet_names
             all_sheets_data = {}
             parsed_json = {}
@@ -318,9 +319,9 @@ def register_experiments_callbacks(app):
             for sheet in sheet_names:
                 if sheet.lower() == "faang_field_values":
                     continue
-                
+
                 df_sheet = excel_file.parse(sheet, dtype=str).fillna("")
-                
+
                 # Store ALL sheets in all_sheets_data (including empty ones) for download functionality
                 # This ensures all sheets are available for download, even if they're empty
                 # For empty sheets, preserve column structure by storing columns info
@@ -335,7 +336,7 @@ def register_experiments_callbacks(app):
                 else:
                     # Store normal records for non-empty sheets
                     all_sheets_data[sheet] = df_sheet.to_dict("records")
-                
+
                 # Only process non-empty sheets for validation
                 if df_sheet.empty:
                     continue
@@ -351,7 +352,7 @@ def register_experiments_callbacks(app):
             if not parsed_json:
                 # Handle case where no data was found in any sheet
                 no_data_msg = html.P("No data found in the uploaded file.", style={'color': 'orange'})
-                return create_output([no_data_msg]), None, None, None
+                return create_output([no_data_msg]), None, None, None, None
 
         except Exception as e:
             # Handle file parsing errors
@@ -359,7 +360,7 @@ def register_experiments_callbacks(app):
                 html.H5(filename),
                 html.P(f"Error processing file: {str(e)}", style={'color': 'red'})
             ])
-            return create_output([error_div]), None, None, None
+            return create_output([error_div]), None, None, None, None
 
         # Send data to backend for validation
         print("file uploaded!!")
@@ -410,7 +411,7 @@ def register_experiments_callbacks(app):
 
         # Update the UI with validation results
         output_children = create_output(validation_components)
-        return output_children, json_validation_results, all_sheets_data, sheets_with_data
+        return output_children, json_validation_results, all_sheets_data, sheets_with_data, parsed_json
 
     # Reset callback for Experiments tab
     app.clientside_callback(
@@ -505,7 +506,7 @@ def register_experiments_callbacks(app):
             "border": "none", "borderRadius": "8px", "cursor": "not-allowed",
             "fontSize": "16px", "width": "140px", "opacity": "0.6"
         }
-        
+
         if not v or "results" not in v:
             return True, disabled_style
         valid_cnt, invalid_cnt = _valid_invalid_experiments_counts(v)
@@ -529,9 +530,10 @@ def register_experiments_callbacks(app):
         State("experiments-password-ena", "value"),
         State("biosamples-action-experiments", "value"),
         State("stored-json-validation-results-experiments", "data"),
+        State("stored-parsed-json-experiments", "data"),
         prevent_initial_call=True,
     )
-    def _submit_experiments(n, username, password, action, v):
+    def _submit_experiments(n, username, password, action, v, original_data):
         """Submit to experiments for Experiments tab"""
         if not n:
             raise PreventUpdate
@@ -561,7 +563,8 @@ def register_experiments_callbacks(app):
         validation_results = v["results"]
 
         body = {
-            "data": validation_results,
+            "validation_results": validation_results,
+            "original_data": original_data,
             "webin_username": username,
             "webin_password": password,
             "mode": "test",  # Default to test server
@@ -664,7 +667,7 @@ def register_experiments_callbacks(app):
             return []
 
         validation_data = validation_results['results']
-        
+
         # OPTIMIZATION: Filter sheet_names to only include those in experiment_types_processed
         # This ensures we only process sheets that were actually processed by the backend
         experiment_types_processed = validation_data.get('experiment_types_processed', []) or []
@@ -687,7 +690,7 @@ def register_experiments_callbacks(app):
             errors = stats.get('error_records', 0)
             warnings = stats.get('warning_records', 0)
             valid = stats.get('valid_records', 0)
-            
+
             # Show all sheets in experiment_types_processed, regardless of errors/warnings
             sheets_with_data.append(sheet_name)
             # Create label showing counts for THIS sheet
@@ -931,7 +934,7 @@ def register_experiments_callbacks(app):
 
         if not all_sheets_data:
             raise PreventUpdate
-        
+
         # Use all sheets from all_sheets_data, not just sheet_names
         # This ensures all sheets (including empty ones) are included in the download
         all_sheet_names = list(all_sheets_data.keys())
@@ -945,7 +948,7 @@ def register_experiments_callbacks(app):
         def _map_field_to_column_excel(field_name, columns):
             if not field_name:
                 return None
-            
+
             # Handle Health Status fields (with or without .term) - same as validation panel
             if "Health Status" in field_name:
                 if ".term" in field_name:
@@ -984,7 +987,7 @@ def register_experiments_callbacks(app):
                         col_str = str(col)
                         if "Health Status" in col_str and "Term Source ID" not in col_str:
                             return col
-            
+
             # Handle Cell Type fields (with or without .term) - same as validation panel
             if "Cell Type" in field_name:
                 if ".term" in field_name:
@@ -1023,7 +1026,7 @@ def register_experiments_callbacks(app):
                         col_str = str(col)
                         if "Cell Type" in col_str and "Term Source ID" not in col_str:
                             return col
-            
+
             # Handle Secondary Project fields - same as validation panel
             if field_name and "secondary project" in field_name.lower():
                 # Extract index from field name if present (e.g., "Secondary Project.0" -> 0, "Secondary Project.1" -> 1)
@@ -1033,7 +1036,7 @@ def register_experiments_callbacks(app):
                     parts = field_lower.split(".", 1)
                     if len(parts) > 1 and parts[1].isdigit():
                         field_index = int(parts[1])
-                
+
                 # Collect all Secondary Project columns in order
                 secondary_project_cols = []
                 for col in columns:
@@ -1042,7 +1045,7 @@ def register_experiments_callbacks(app):
                     # Match exact "Secondary Project" or numbered versions like "Secondary Project.0", "Secondary Project.1"
                     if col_lower == "secondary project" or col_lower.startswith("secondary project."):
                         secondary_project_cols.append(col)
-                
+
                 if secondary_project_cols:
                     # If field has a specific index (e.g., "Secondary Project.0"), try to match that index
                     if field_index is not None and 0 <= field_index < len(secondary_project_cols):
@@ -1060,13 +1063,13 @@ def register_experiments_callbacks(app):
                     else:
                         # No specific index in field name, or index out of range - return first Secondary Project column
                         return secondary_project_cols[0]
-                
+
                 # Fallback: try any column that starts with "Secondary Project" (case insensitive)
                 for col in columns:
                     col_str = str(col)
                     if col_str.lower().startswith("secondary project"):
                         return col
-            
+
             # Handle Term Source ID fields - same as validation panel
             if field_name and field_name.lower().startswith("term source id"):
                 # Find the first "Term Source ID" column (without numbered suffix first, then with suffix)
@@ -1088,12 +1091,12 @@ def register_experiments_callbacks(app):
                     col_str = str(col)
                     if "term source id" in col_str.lower():
                         return col
-            
+
             # Try direct match first
             direct = _resolve_col(field_name, columns)
             if direct:
                 return direct
-            
+
             # Handle fields with dot notation (e.g., "Secondary Project.0", "Field.1", etc.)
             if "." in field_name:
                 base = field_name.split(".", 1)[0]
@@ -1116,7 +1119,7 @@ def register_experiments_callbacks(app):
                             col_base = col_str.split(".", 1)[0]
                             if col_base.lower() == base_lower:
                                 return col
-            
+
             return None
 
         if validation_results and 'results' in validation_results:
@@ -1174,7 +1177,7 @@ def register_experiments_callbacks(app):
 
                 # Get original sheet data
                 sheet_data = all_sheets_data[sheet_name]
-                
+
                 # Handle empty sheets - check if it's stored with special structure
                 if isinstance(sheet_data, dict) and sheet_data.get("_empty"):
                     # This is an empty sheet with preserved column structure
@@ -1185,10 +1188,10 @@ def register_experiments_callbacks(app):
                     sheet_name_clean = sheet_name[:31]  # Excel sheet name limit
                     df.to_excel(writer, sheet_name=sheet_name_clean, index=False)
                     continue
-                
+
                 # Normal sheet with data
                 sheet_records = sheet_data if isinstance(sheet_data, list) else []
-                
+
                 # Skip if somehow still empty
                 if not sheet_records:
                     # Fallback: create empty DataFrame
@@ -1224,7 +1227,7 @@ def register_experiments_callbacks(app):
                         # Map error fields to columns - same logic as validation panel
                         for field, msgs in field_errors.items():
                             lower_field = field.lower()
-                            
+
                             # Special handling for Secondary Project: highlight ALL columns (same as validation panel)
                             if "secondary project" in lower_field:
                                 # Find all Secondary Project columns
@@ -1247,7 +1250,7 @@ def register_experiments_callbacks(app):
                                             else:
                                                 row_to_field_errors[row_idx]["errors"][col_idx]["messages"] = [existing] + (msgs if isinstance(msgs, list) else [msgs])
                                 continue  # Skip normal processing for Secondary Project
-                            
+
                             # Normal processing for other fields
                             col = _map_field_to_column_excel(field, cols_original)
                             if col:
@@ -1261,7 +1264,7 @@ def register_experiments_callbacks(app):
                                         if str(c).lower() == str(col).lower():
                                             col_idx = i
                                             break
-                                
+
                                 if col_idx is not None:
                                     # Store both messages and field name for tooltip
                                     row_to_field_errors[row_idx]["errors"][col_idx] = {
@@ -1272,7 +1275,7 @@ def register_experiments_callbacks(app):
                         # Map warning fields to columns - same logic as validation panel
                         for field, msgs in field_warnings.items():
                             lower_field = field.lower()
-                            
+
                             # Special handling for Secondary Project: highlight ALL columns (same as validation panel)
                             if "secondary project" in lower_field:
                                 # Find all Secondary Project columns
@@ -1295,7 +1298,7 @@ def register_experiments_callbacks(app):
                                             else:
                                                 row_to_field_errors[row_idx]["warnings"][col_idx]["messages"] = [existing] + (msgs if isinstance(msgs, list) else [msgs])
                                 continue  # Skip normal processing for Secondary Project
-                            
+
                             # Normal processing for other fields
                             col = _map_field_to_column_excel(field, cols_original)
                             if col:
@@ -1309,7 +1312,7 @@ def register_experiments_callbacks(app):
                                         if str(c).lower() == str(col).lower():
                                             col_idx = i
                                             break
-                                
+
                                 if col_idx is not None:
                                     # Store both messages and field name for tooltip
                                     row_to_field_errors[row_idx]["warnings"][col_idx] = {
@@ -1360,7 +1363,7 @@ def register_experiments_callbacks(app):
 
                     if row_idx in row_to_field_errors:
                         field_data = row_to_field_errors[row_idx]
-                        
+
                         # Get all columns that have errors or warnings
                         all_affected_cols = set()
                         all_affected_cols.update(field_data.get("errors", {}).keys())
@@ -1370,7 +1373,7 @@ def register_experiments_callbacks(app):
                             # Use cols_original for bounds check since row_to_field_errors uses cols_original indices
                             if col_idx >= len(cols_original) or col_idx < 0:
                                 continue
-                            
+
                             # Get cell value from the cleaned DataFrame
                             # Note: col_idx should be the same for both original and cleaned since they have same structure
                             try:
@@ -1383,17 +1386,17 @@ def register_experiments_callbacks(app):
                                     cell_value = ""
                             except Exception:
                                 cell_value = ""
-                            
+
                             # Check if this cell has errors (errors take precedence)
                             has_errors = col_idx in field_data.get("errors", {})
                             has_warnings = col_idx in field_data.get("warnings", {})
-                            
+
                             if not (has_errors or has_warnings):
                                 continue
-                            
+
                             # Combine tooltip messages from both errors and warnings
                             tooltip_parts = []
-                            
+
                             if has_errors:
                                 error_data = field_data["errors"][col_idx]
                                 field_name = error_data.get("field",
@@ -1414,7 +1417,7 @@ def register_experiments_callbacks(app):
                                     tooltip_parts.append(f"Warning - {field_name}: {msg}")
                                 # Highlight in yellow (only warnings, no errors) - overwrite cell with formatting
                                 ws.write(excel_row, col_idx, cell_value, fmt_yellow)
-                            
+
                             # Add warnings to tooltip even if cell is highlighted red (errors take precedence)
                             if has_errors and has_warnings:
                                 warning_data = field_data["warnings"][col_idx]
@@ -1424,7 +1427,7 @@ def register_experiments_callbacks(app):
                                 msgs_list = msgs if isinstance(msgs, list) else [msgs]
                                 for msg in msgs_list:
                                     tooltip_parts.append(f"Warning - {field_name}: {msg}")
-                            
+
                             # Add combined tooltip
                             if tooltip_parts:
                                 tooltip_text = "\n".join([f"• {part}" for part in tooltip_parts])
@@ -1503,7 +1506,7 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
     def _map_field_to_column(field_name, columns):
         if not field_name:
             return None
-        
+
         # Handle Health Status fields (with or without .term)
         if "Health Status" in field_name:
             if ".term" in field_name:
@@ -1542,7 +1545,7 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
                     col_str = str(col)
                     if "Health Status" in col_str and "Term Source ID" not in col_str:
                         return col
-        
+
         # Handle Cell Type fields (with or without .term)
         if "Cell Type" in field_name:
             if ".term" in field_name:
@@ -1581,7 +1584,7 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
                     col_str = str(col)
                     if "Cell Type" in col_str and "Term Source ID" not in col_str:
                         return col
-        
+
         # Handle Secondary Project fields - check if field starts with "Secondary Project"
         if field_name and "secondary project" in field_name.lower():
             # Extract index from field name if present (e.g., "Secondary Project.0" -> 0, "Secondary Project.1" -> 1)
@@ -1591,7 +1594,7 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
                 parts = field_lower.split(".", 1)
                 if len(parts) > 1 and parts[1].isdigit():
                     field_index = int(parts[1])
-            
+
             # Collect all Secondary Project columns in order
             secondary_project_cols = []
             for col in columns:
@@ -1600,7 +1603,7 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
                 # Match exact "Secondary Project" or numbered versions like "Secondary Project.0", "Secondary Project.1"
                 if col_lower == "secondary project" or col_lower.startswith("secondary project."):
                     secondary_project_cols.append(col)
-            
+
             if secondary_project_cols:
                 # If field has a specific index (e.g., "Secondary Project.0"), try to match that index
                 if field_index is not None and 0 <= field_index < len(secondary_project_cols):
@@ -1618,13 +1621,13 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
                 else:
                     # No specific index in field name, or index out of range - return first Secondary Project column
                     return secondary_project_cols[0]
-            
+
             # Fallback: try any column that starts with "Secondary Project" (case insensitive)
             for col in columns:
                 col_str = str(col)
                 if col_str.lower().startswith("secondary project"):
                     return col
-        
+
         # Handle Term Source ID fields - check if field starts with "Term Source ID"
         if field_name and field_name.lower().startswith("term source id"):
             # Find the first "Term Source ID" column (without numbered suffix first, then with suffix)
@@ -1646,12 +1649,12 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
                 col_str = str(col)
                 if "term source id" in col_str.lower():
                     return col
-        
+
         # Try direct match first
         direct = _resolve_col(field_name, columns)
         if direct:
             return direct
-        
+
         # Handle fields with dot notation (e.g., "Secondary Project.0", "Field.1", etc.)
         if "." in field_name:
             base = field_name.split(".", 1)[0]
@@ -1674,7 +1677,7 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
                         col_base = col_str.split(".", 1)[0]
                         if col_base.lower() == base_lower:
                             return col
-        
+
         return None
 
     # Build cell styles and tooltips
@@ -1693,7 +1696,7 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
                 msgs_list = _as_list(msgs)
                 lower_msgs = [m.lower() for m in msgs_list]
                 lower_field = field.lower()
-                
+
                 # Special handling for Secondary Project: highlight ALL columns
                 if "secondary project" in lower_field:
                     # Find all Secondary Project columns
@@ -1712,7 +1715,7 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
                             combined = msg_text
                         tips[secondary_project_cols[0]] = {'value': combined, 'type': 'markdown'}
                         continue  # Skip normal processing for Secondary Project
-                
+
                 # Normal processing for other fields
                 col = _map_field_to_column(field, df_all.columns)
                 if not col:
@@ -1751,7 +1754,7 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
             for field, msgs in field_warnings.items():
                 msgs_list = _as_list(msgs)
                 lower_field = field.lower()
-                
+
                 # Special handling for Secondary Project: highlight ALL columns with yellow
                 if "secondary project" in lower_field:
                     # Find all Secondary Project columns
@@ -1770,7 +1773,7 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
                             combined = warn_text
                         tips[secondary_project_cols[0]] = {'value': combined, 'type': 'markdown'}
                         continue  # Skip normal processing for Secondary Project
-                
+
                 # Normal processing for other fields
                 col = _map_field_to_column(field, df_all.columns)
                 if not col:
@@ -1974,7 +1977,7 @@ def _calculate_sheet_statistics_experiments(validation_results, all_sheets_data)
 
         invalid_key = "invalid"
         valid_key = "valid"
-        
+
         invalid_records = et_data.get(invalid_key, [])
         valid_records = et_data.get(valid_key, [])
 
@@ -2000,7 +2003,7 @@ def _calculate_sheet_statistics_experiments(validation_results, all_sheets_data)
                     if identifier:
                         sheet_sample_names.add(identifier)
 
-                
+
                 if sample_descriptor in sheet_sample_names:
                     if sheet_name not in sheet_stats:
                         sheet_stats[sheet_name] = {
@@ -2029,4 +2032,3 @@ def _calculate_sheet_statistics_experiments(validation_results, all_sheets_data)
         stats['valid_records'] = stats['total_records'] - stats['error_records']
 
     return sheet_stats
-
