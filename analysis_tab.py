@@ -711,7 +711,10 @@ def register_analysis_callbacks(app):
                     value=sheet_name,
                     id={'type': 'sheet-validation-tab-analysis', 'sheet_name': sheet_name},
                     style={
-                        'border': 'none',
+                        'borderTop': 'none',
+                        'borderRight': 'none',
+                        'borderBottom': 'none',
+                        'borderLeft': 'none',
                         'padding': '12px 24px',
                         'marginRight': '4px',
                         'backgroundColor': '#f5f5f5',
@@ -722,7 +725,9 @@ def register_analysis_callbacks(app):
                         'cursor': 'pointer'
                     },
                     selected_style={
-                        'border': 'none',
+                        'borderTop': 'none',
+                        'borderRight': 'none',
+                        'borderLeft': 'none',
                         'borderBottom': '3px solid #4CAF50',
                         'backgroundColor': '#ffffff',
                         'color': '#4CAF50',
@@ -748,7 +753,9 @@ def register_analysis_callbacks(app):
             value=sheets_with_data[0] if sheets_with_data else None,
             children=sheet_tabs,
             style={
-                'border': 'none',
+                'borderTop': 'none',
+                'borderRight': 'none',
+                'borderLeft': 'none',
                 'borderBottom': '2px solid #e0e0e0',
                 'marginBottom': '20px'
             },
