@@ -198,32 +198,6 @@ def build_json_data(headers: List[str], rows: List[List[str]], sheet_name: str =
                         }
                     i += 1
                 continue
-
-            # Special handling for experiment target (experiment field)
-            elif has_experiment_target and col.startswith("Experiment Target"):
-                # Check next column for Term Source ID or Term
-                if i + 1 < len(headers) and ("Term Source ID" in headers[i + 1] or "Term" in headers[i + 1]):
-                    term_val = row[i + 1] if i + 1 < len(row) else ""
-                    record["Experiment Target"] = {
-                        "text": val,
-                        "term": term_val
-                    }
-                    i += 2
-                else:
-                    # If only text is provided, set term to empty
-                    if val:
-                        record["Experiment Target"] = {
-                            "text": val,
-                            "term": ""
-                        }
-                    i += 1
-                continue
-
-            # Skip "Term Source ID" if it's already processed as part of experiment target
-            elif col == "Term Source ID" and "Experiment Target" in record:
-                i += 1
-                continue
-
             # Special handling for experiment type (analysis field - array of objects)
             elif has_experiment_type and col.startswith("experiment type"):
                 if val:  # Only append non-empty values

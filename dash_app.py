@@ -489,6 +489,8 @@ app.layout = html.Div([
         html.Div(id='dummy-output-for-reset'),
         html.Div(id='dummy-output-for-reset-experiments'),
         html.Div(id='dummy-output-for-reset-analysis'),
+        html.Div(id='dummy-output-tab-styling-analysis', style={'display': 'none'}),
+        html.Div(id='dummy-output-tab-styling-experiments', style={'display': 'none'}),
         # Stores for Samples tab
         dcc.Store(id='stored-file-data'),
         dcc.Store(id='stored-filename'),
@@ -521,6 +523,8 @@ app.layout = html.Div([
         dcc.Store(id='active-sheet-analysis', data=None),
         dcc.Store(id='stored-json-validation-results-analysis', data=None),
         dcc.Download(id='download-table-csv'),
+        dcc.Download(id='download-table-csv-analysis'),
+        dcc.Download(id='download-table-csv-experiments'),
         dcc.Interval(id="submission-poller", interval=2000, n_intervals=0, disabled=True),
         html.Div(
             id='error-popup-container',
