@@ -69,8 +69,6 @@ def build_json_data(headers: List[str], rows: List[List[str]], sheet_name: str =
     has_experiment_type = any(h.startswith("Experiment Type") for h in headers)
     has_platform = any(h.startswith("Platform") for h in headers)
     has_secondary_project = any(h.startswith("Secondary Project") for h in headers)
-    # Secondary Project should be a list only for analysis/experiment sheets
-    has_secondary_project_as_list = is_analysis_or_experiment_sheet and has_secondary_project
     # List fields that should be arrays only for analysis sheets
     has_file_names = is_analysis_sheet and any(h.startswith("File Names") for h in headers)
     has_file_types = is_analysis_sheet and any(h.startswith("File Types") for h in headers)
@@ -96,7 +94,7 @@ def build_json_data(headers: List[str], rows: List[List[str]], sheet_name: str =
             record["Experiment Type"] = []
         if has_platform:
             record["Platform"] = []
-        if has_secondary_project_as_list:
+        if has_secondary_project:
             record["Secondary Project"] = []
         if has_file_names:
             record["File Names"] = []
@@ -209,19 +207,9 @@ def build_json_data(headers: List[str], rows: List[List[str]], sheet_name: str =
                 i += 1
                 continue
 
-            # Special handling for Secondary Project (list for analysis/experiment sheets, single value for sample sheets)
             elif has_secondary_project and col.startswith("Secondary Project"):
-                if has_secondary_project_as_list:
-                    # For analysis/experiment sheets: treat as list
-                    if val:  # Only append non-empty values
-                        record["Secondary Project"].append(val)
-                else:
-                    # For sample sheets: treat as single value (use first non-empty value)
-                    if "Secondary Project" not in record:
-                        record["Secondary Project"] = val if val else None
-                    elif not record["Secondary Project"] and val:
-                        # Update if current value is empty/None and we have a non-empty value
-                        record["Secondary Project"] = val
+                if val:  # Only append non-empty values
+                    record["Secondary Project"].append(val)
                 i += 1
                 continue
 
