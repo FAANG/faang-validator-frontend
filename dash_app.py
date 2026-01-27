@@ -1429,7 +1429,7 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
     if not sheet_tabs:
         return html.Div([
             html.P(
-                "The provided file is not Samples can you please upload relevant file!!",
+                "The uploaded file could not be processed because it does not contain sample information. Please upload a valid samples file.",
                 style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
         ])
 

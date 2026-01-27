@@ -702,7 +702,7 @@ def register_experiments_callbacks(app):
         if not experiment_types_processed:
             return html.Div([
                 html.P(
-                    "The provided file is not Experiments can you please upload relevant file!!",
+                    "TThe uploaded file could not be processed because it does not contain sample information. Please upload a valid experiments file.",
                     style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
             ])
 
@@ -769,7 +769,7 @@ def register_experiments_callbacks(app):
         if not sheet_tabs:
             return html.Div([
                 html.P(
-                    "The provided file is not Experiments can you please upload relevant file!!",
+                    "The uploaded file could not be processed because it does not contain experiment information. Please upload a valid experiments file.",
                     style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
             ])
 

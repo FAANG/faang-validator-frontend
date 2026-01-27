@@ -716,7 +716,7 @@ def register_analysis_callbacks(app):
         if not analysis_types_processed:
             return html.Div([
                 html.P(
-                    "The provided file is not Analysis can you please upload relevant file!!",
+                    "The uploaded file could not be processed because it does not contain analysis information. Please upload a valid analysis file.",
                     style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
             ])
 
@@ -780,7 +780,7 @@ def register_analysis_callbacks(app):
         if not sheet_tabs:
             return html.Div([
                 html.P(
-                    "The provided file is not Analysis can you please upload relevant file!!",
+                    "The uploaded file could not be processed because it does not contain sample information. Please upload a valid analysis file.",
                     style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
             ])
 
