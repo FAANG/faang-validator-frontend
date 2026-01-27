@@ -423,22 +423,35 @@ def register_analysis_callbacks(app):
             return html.Div(current_children + [error_div] if isinstance(current_children, list) else [current_children,
                                                                                                        error_div]), None
 
-        validation_components = [
-            dcc.Store(id='stored-error-data-analysis', data=error_data),
-            dcc.Store(id='stored-validation-results-analysis', data={'valid_count': valid_count, 'invalid_count': invalid_count,
-                                                            'all_sheets_data': all_sheets_validation_data}),
-            html.H3("2. Conversion and Validation results"),
+        # Decide what to render based on whether any analysis types were processed.
+        analysis_types_processed = json_validation_results.get("results", {}).get("analysis_types_processed", []) or []
 
-            html.Div([
-                html.P("Conversion Status", style={'fontWeight': 'bold'}),
-                html.P("Success", style={'color': 'green', 'fontWeight': 'bold'}),
-                html.P("Validation Status", style={'fontWeight': 'bold'}),
-                html.P("Finished", style={'color': 'green', 'fontWeight': 'bold'}),
-            ], style={'margin': '10px 0'}),
+        if not analysis_types_processed:
+            # Wrong template for Analysis: keep only the container div so that
+            # the populate_validation_results_tabs_analysis callback can show
+            # the "provided file is not Analysis" message. Do NOT show the
+            # "2. Conversion and Validation results" header or status panel.
+            validation_components = [
+                html.Div(id='validation-results-container-analysis', style={'margin': '20px 0'})
+            ]
+        else:
+            # Normal case: show full Conversion and Validation panel + container.
+            validation_components = [
+                dcc.Store(id='stored-error-data-analysis', data=error_data),
+                dcc.Store(id='stored-validation-results-analysis', data={'valid_count': valid_count, 'invalid_count': invalid_count,
+                                                                'all_sheets_data': all_sheets_validation_data}),
+                html.H3("2. Conversion and Validation results"),
 
-            html.Div(id='error-table-container-analysis', style={'display': 'none'}),
-            html.Div(id='validation-results-container-analysis', style={'margin': '20px 0'})
-        ]
+                html.Div([
+                    html.P("Conversion Status", style={'fontWeight': 'bold'}),
+                    html.P("Success", style={'color': 'green', 'fontWeight': 'bold'}),
+                    html.P("Validation Status", style={'fontWeight': 'bold'}),
+                    html.P("Finished", style={'color': 'green', 'fontWeight': 'bold'}),
+                ], style={'margin': '10px 0'}),
+
+                html.Div(id='error-table-container-analysis', style={'display': 'none'}),
+                html.Div(id='validation-results-container-analysis', style={'margin': '20px 0'})
+            ]
 
         if current_children is None:
             return html.Div(validation_components), json_validation_results if json_validation_results else {'results': {}}
@@ -476,6 +489,14 @@ def register_analysis_callbacks(app):
         base_style = {"display": "block", "marginTop": "16px"}
 
         if not v or "results" not in v:
+            return ({"display": "none"}, "", {"display": "none"})
+
+        validation_data = v.get("results", {})
+        analysis_types_processed = validation_data.get("analysis_types_processed", []) or []
+
+        # If the uploaded file did not produce any analysis sheets,
+        # hide the BioSamples submit panel entirely (wrong template for this tab)
+        if not analysis_types_processed:
             return ({"display": "none"}, "", {"display": "none"})
 
         valid_cnt, invalid_cnt = _valid_invalid_analysis_counts(v)
@@ -527,6 +548,14 @@ def register_analysis_callbacks(app):
         """Enable/disable submit button for Analysis tab"""
         if not v or "results" not in v:
             return True
+
+        validation_data = v.get("results", {})
+        analysis_types_processed = validation_data.get("analysis_types_processed", []) or []
+
+        # If the uploaded file is not an Analysis template, keep the button disabled
+        if not analysis_types_processed:
+            return True
+
         valid_cnt, _ = _valid_invalid_analysis_counts(v)
         if valid_cnt == 0:
             return True
@@ -680,12 +709,19 @@ def register_analysis_callbacks(app):
             return []
 
         validation_data = validation_results['results']
-        
-        # Filter sheet_names to only include those in analysis_types_processed
+
+        # Filter sheet_names to only include those in analysis_types_processed.
+        # If nothing was processed, this means the file is not an Analysis template.
         analysis_types_processed = validation_data.get('analysis_types_processed', []) or []
-        if analysis_types_processed:
-            # Only show sheets that are in analysis_types_processed
-            sheet_names = [sheet for sheet in sheet_names if sheet in analysis_types_processed]
+        if not analysis_types_processed:
+            return html.Div([
+                html.P(
+                    "The provided file is not Analysis can you please upload relevant file!!",
+                    style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
+            ])
+
+        # Only show sheets that are in analysis_types_processed
+        sheet_names = [sheet for sheet in sheet_names if sheet in analysis_types_processed]
 
         # Calculate sheet statistics for analysis
         sheet_stats = _calculate_sheet_statistics_analysis(validation_results, all_sheets_data or {})
@@ -744,7 +780,7 @@ def register_analysis_callbacks(app):
         if not sheet_tabs:
             return html.Div([
                 html.P(
-                    "The provided data has been validated successfully with no errors or warnings. You may proceed with submission.",
+                    "The provided file is not Analysis can you please upload relevant file!!",
                     style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
             ])
 

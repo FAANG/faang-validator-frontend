@@ -383,8 +383,8 @@ def register_experiments_callbacks(app):
         else:
             raise Exception(f"Error {response.status_code}: {response.text}")
 
-    # Process validation response
-    # (The logic for handling different response formats remains the same)
+        # Process validation response
+        # (The logic for handling different response formats remains the same)
         if isinstance(response_json, dict) and 'results' in response_json:
             json_validation_results = response_json
         elif isinstance(response_json, dict):
@@ -396,18 +396,30 @@ def register_experiments_callbacks(app):
             invalid_count = validation_data.get('invalid_experiments', 0)
             all_sheets_validation_data = validation_data.get('all_sheets_data', {})
 
-        # Create validation result components
-        validation_components = [
-            html.H3("2. Conversion and Validation results"),
-            html.Div([
-                html.P("Conversion Status", style={'fontWeight': 'bold'}),
-                html.P("Success", style={'color': 'green', 'fontWeight': 'bold'}),
-                html.P("Validation Status", style={'fontWeight': 'bold'}),
-                html.P("Finished", style={'color': 'green', 'fontWeight': 'bold'}),
-            ], style={'margin': '10px 0'}),
-            html.Div(id='error-table-container-experiments', style={'display': 'none'}),
-            html.Div(id='validation-results-container-experiments', style={'margin': '20px 0'})
-        ]
+        # Decide what to render based on whether any experiment types were processed.
+        experiment_types_processed = json_validation_results.get("results", {}).get("experiment_types_processed", []) or []
+
+        if not experiment_types_processed:
+            # Wrong template for Experiments: keep only the container div so that
+            # the populate_validation_results_tabs_experiments callback can show
+            # the "provided file is not Experiments" message. Do NOT show the
+            # "2. Conversion and Validation results" header or status panel.
+            validation_components = [
+                html.Div(id='validation-results-container-experiments', style={'margin': '20px 0'})
+            ]
+        else:
+            # Normal case: show full Conversion and Validation panel + container.
+            validation_components = [
+                html.H3("2. Conversion and Validation results"),
+                html.Div([
+                    html.P("Conversion Status", style={'fontWeight': 'bold'}),
+                    html.P("Success", style={'color': 'green', 'fontWeight': 'bold'}),
+                    html.P("Validation Status", style={'fontWeight': 'bold'}),
+                    html.P("Finished", style={'color': 'green', 'fontWeight': 'bold'}),
+                ], style={'margin': '10px 0'}),
+                html.Div(id='error-table-container-experiments', style={'display': 'none'}),
+                html.Div(id='validation-results-container-experiments', style={'margin': '20px 0'})
+            ]
 
         # Update the UI with validation results
         output_children = create_output(validation_components)
@@ -442,6 +454,14 @@ def register_experiments_callbacks(app):
         base_style = {"display": "block", "marginTop": "16px"}
 
         if not v or "results" not in v:
+            return ({"display": "none"}, "", {"display": "none"})
+
+        validation_data = v.get("results", {})
+        experiment_types_processed = validation_data.get("experiment_types_processed", []) or []
+
+        # If the uploaded file did not produce any experiment sheets,
+        # hide the ENA submit panel entirely (wrong template for this tab)
+        if not experiment_types_processed:
             return ({"display": "none"}, "", {"display": "none"})
 
         valid_cnt, invalid_cnt = _valid_invalid_experiments_counts(v)
@@ -509,6 +529,14 @@ def register_experiments_callbacks(app):
 
         if not v or "results" not in v:
             return True, disabled_style
+
+        validation_data = v.get("results", {})
+        experiment_types_processed = validation_data.get("experiment_types_processed", []) or []
+
+        # If the uploaded file is not an Experiments template, keep the button disabled
+        if not experiment_types_processed:
+            return True, disabled_style
+
         valid_cnt, invalid_cnt = _valid_invalid_experiments_counts(v)
         # Disable if there are any invalid experiments
         if invalid_cnt > 0:
@@ -668,15 +696,21 @@ def register_experiments_callbacks(app):
 
         validation_data = validation_results['results']
 
-        # OPTIMIZATION: Filter sheet_names to only include those in experiment_types_processed
-        # This ensures we only process sheets that were actually processed by the backend
+        # Filter sheet_names to only include those in experiment_types_processed.
+        # If nothing was processed, this means the file is not an Experiments template.
         experiment_types_processed = validation_data.get('experiment_types_processed', []) or []
-        if experiment_types_processed:
-            # Only show sheets that are in experiment_types_processed
-            sheet_names = [sheet for sheet in sheet_names if sheet in experiment_types_processed]
-            # Also filter all_sheets_data to only include processed sheets for better performance
-            if all_sheets_data:
-                all_sheets_data = {k: v for k, v in all_sheets_data.items() if k in experiment_types_processed}
+        if not experiment_types_processed:
+            return html.Div([
+                html.P(
+                    "The provided file is not Experiments can you please upload relevant file!!",
+                    style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
+            ])
+
+        # Only show sheets that are in experiment_types_processed
+        sheet_names = [sheet for sheet in sheet_names if sheet in experiment_types_processed]
+        # Also filter all_sheets_data to only include processed sheets for better performance
+        if all_sheets_data:
+            all_sheets_data = {k: v for k, v in all_sheets_data.items() if k in experiment_types_processed}
 
         # Calculate sheet statistics for experiments (now only processes filtered sheets)
         sheet_stats = _calculate_sheet_statistics_experiments(validation_results, all_sheets_data or {})
@@ -735,7 +769,7 @@ def register_experiments_callbacks(app):
         if not sheet_tabs:
             return html.Div([
                 html.P(
-                    "The provided data has been validated successfully with no errors or warnings. You may proceed with submission.",
+                    "The provided file is not Experiments can you please upload relevant file!!",
                     style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
             ])
 

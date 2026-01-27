@@ -854,6 +854,23 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
         return html.Div(current_children + [error_div] if isinstance(current_children, list) else [current_children,
                                                                                                    error_div]), None
 
+    # If the backend did not process any sample types, this means the file
+    # is not a valid Samples template. In that case, do not show the
+    # "Conversion and Validation results" header or status panel, but still
+    # render the validation-results container so the callback can display
+    # the "wrong template" message.
+    sample_types_processed = json_validation_results.get("results", {}).get("sample_types_processed", []) or []
+    if not sample_types_processed:
+        validation_components = [
+            html.Div(id='validation-results-container', style={'margin': '20px 0'})
+        ]
+        if current_children is None:
+            return html.Div(validation_components), json_validation_results
+        elif isinstance(current_children, list):
+            return html.Div(current_children + validation_components), json_validation_results
+        else:
+            return html.Div(validation_components + [current_children]), json_validation_results
+
     validation_components = [
         dcc.Store(id='stored-error-data', data=error_data),
         dcc.Store(id='stored-validation-results', data={'valid_count': valid_count, 'invalid_count': invalid_count,
@@ -1412,7 +1429,7 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
     if not sheet_tabs:
         return html.Div([
             html.P(
-                "The provided data has been validated successfully with no errors or warnings. You may proceed with submission.",
+                "The provided file is not Samples can you please upload relevant file!!",
                 style={'textAlign': 'center', 'padding': '20px', 'color': '#666'})
         ])
 
@@ -2244,7 +2261,11 @@ def _mount_biosamples_form(v):
         raise PreventUpdate
 
     results = v.get("results", {})
-    if not results.get("sample_results"):
+    sample_types_processed = results.get("sample_types_processed", []) or []
+
+    # If there are no sample results or no sample types processed,
+    # do not mount the BioSamples form (wrong file for Samples tab)
+    if not results.get("sample_results") or not sample_types_processed:
         raise PreventUpdate
 
     return biosamples_form()
@@ -2262,6 +2283,14 @@ def _toggle_biosamples_form(v):
     base_style = {"display": "block", "marginTop": "16px"}
 
     if not v or "results" not in v:
+        return ({"display": "none"}, "", {"display": "none"})
+
+    validation_data = v.get("results", {})
+    sample_types_processed = validation_data.get("sample_types_processed", []) or []
+
+    # If the uploaded file did not produce any samples sheets,
+    # hide the BioSamples submit panel entirely
+    if not sample_types_processed:
         return ({"display": "none"}, "", {"display": "none"})
 
     valid_cnt, invalid_cnt = _valid_invalid_counts(v)
@@ -2326,6 +2355,14 @@ def _disable_submit(u, p, v):
     
     if not v or "results" not in v:
         return True, disabled_style
+
+    validation_data = v.get("results", {})
+    sample_types_processed = validation_data.get("sample_types_processed", []) or []
+
+    # If the uploaded file is not a Samples template, keep the button disabled
+    if not sample_types_processed:
+        return True, disabled_style
+
     valid_cnt, invalid = _valid_invalid_counts(v)
     # Enable submit button only when total samples == valid samples (i.e., invalid == 0)
     # This means all samples are valid
