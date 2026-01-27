@@ -543,7 +543,10 @@ app.layout = html.Div([
         ),
         dcc.Tabs([
             dcc.Tab(label='Samples', style={
-                'border': 'none',
+                'borderTop': 'none',
+                'borderRight': 'none',
+                'borderBottom': 'none',
+                'borderLeft': 'none',
                 'padding': '12px 24px',
                 'marginRight': '4px',
                 'backgroundColor': '#f5f5f5',
@@ -554,7 +557,9 @@ app.layout = html.Div([
                 'cursor': 'pointer'
             },
                     selected_style={
-                        'border': 'none',
+                        'borderTop': 'none',
+                        'borderRight': 'none',
+                        'borderLeft': 'none',
                         'borderBottom': '3px solid #4CAF50',
                         'backgroundColor': '#ffffff',
                         'color': '#4CAF50',
@@ -567,7 +572,10 @@ app.layout = html.Div([
                     create_tab_content('samples')
                 ]),
             dcc.Tab(label='Experiments', style={
-                'border': 'none',
+                'borderTop': 'none',
+                'borderRight': 'none',
+                'borderBottom': 'none',
+                'borderLeft': 'none',
                 'padding': '12px 24px',
                 'marginRight': '4px',
                 'backgroundColor': '#f5f5f5',
@@ -578,7 +586,9 @@ app.layout = html.Div([
                 'cursor': 'pointer'
             },
                     selected_style={
-                        'border': 'none',
+                        'borderTop': 'none',
+                        'borderRight': 'none',
+                        'borderLeft': 'none',
                         'borderBottom': '3px solid #4CAF50',
                         'backgroundColor': '#ffffff',
                         'color': '#4CAF50',
@@ -591,7 +601,10 @@ app.layout = html.Div([
                     create_tab_content('experiments')
                 ]),
             dcc.Tab(label='Analysis', style={
-                'border': 'none',
+                'borderTop': 'none',
+                'borderRight': 'none',
+                'borderBottom': 'none',
+                'borderLeft': 'none',
                 'padding': '12px 24px',
                 'marginRight': '4px',
                 'backgroundColor': '#f5f5f5',
@@ -602,7 +615,9 @@ app.layout = html.Div([
                 'cursor': 'pointer'
             },
                     selected_style={
-                        'border': 'none',
+                        'borderTop': 'none',
+                        'borderRight': 'none',
+                        'borderLeft': 'none',
                         'borderBottom': '3px solid #4CAF50',
                         'backgroundColor': '#ffffff',
                         'color': '#4CAF50',
@@ -614,7 +629,13 @@ app.layout = html.Div([
                     }, children=[
                     create_tab_content('analysis')
                 ])
-        ], style={'margin': '20px 0', 'border': 'none', 'borderBottom': '2px solid #e0e0e0'},
+        ], style={
+            'margin': '20px 0',
+            'borderTop': 'none',
+            'borderRight': 'none',
+            'borderLeft': 'none',
+            'borderBottom': '2px solid #e0e0e0'
+        },
             colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"})
     ], className='container')
 ])
@@ -2101,11 +2122,27 @@ def create_sheet_tabs_ui(sheet_names, active_sheet, all_sheets_data=None):
                     label=sheet_name,
                     value=sheet_name,
                     id={'type': 'sheet-tab', 'index': i + start_index},
-                    style={'padding': '10px 20px', 'borderRadius': '4px 4px 0 0', 'border': 'none'},
-                    selected_style={'backgroundColor': '#4CAF50', 'color': 'white', 'padding': '10px 20px',
-                                    'borderRadius': '4px 4px 0 0', 'fontWeight': 'bold',
-                                    'boxShadow': '0 2px 5px rgba(0,0,0,0.2)', 'border': 'none',
-                                    'borderBottom': '2px solid blue'}
+                    style={
+                        'padding': '10px 20px',
+                        'borderRadius': '4px 4px 0 0',
+                        'borderTop': 'none',
+                        'borderRight': 'none',
+                        'borderBottom': 'none',
+                        'borderLeft': 'none',
+                    },
+
+                    selected_style={
+                        'backgroundColor': '#4CAF50',
+                        'color': 'white',
+                        'padding': '10px 20px',
+                        'borderRadius': '4px 4px 0 0',
+                        'fontWeight': 'bold',
+                        'boxShadow': '0 2px 5px rgba(0,0,0,0.2)',
+                        'borderTop': 'none',
+                        'borderRight': 'none',
+                        'borderLeft': 'none',
+                        'borderBottom': '2px solid blue',
+                    }
                 ) for i, sheet_name in enumerate(filtered_sheet_names)
             ],
             style={'width': '100%', 'marginBottom': '20px', 'border': 'none'},
