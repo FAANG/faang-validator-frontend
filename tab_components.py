@@ -113,6 +113,7 @@ def create_biosamples_form(tab_type: str):
                 id=f"biosamples-username-{tab_type}",
                 type="text",
                 placeholder="Webin username",
+                value="",
                 style={
                     "width": "100%", "padding": "10px", "borderRadius": "8px",
                     "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF",
@@ -132,6 +133,7 @@ def create_biosamples_form(tab_type: str):
                 id=f"biosamples-password-{tab_type}",
                 type="password",
                 placeholder="Password",
+                value="",
                 style={
                     "width": "100%", "padding": "10px", "borderRadius": "8px",
                     "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF",
@@ -191,6 +193,7 @@ def create_ena_form(tab_type: str):
                 id=f"biosamples-username-{tab_type}",
                 type="text",
                 placeholder="Webin username",
+                value="",
                 style={
                     "width": "100%", "padding": "10px", "borderRadius": "8px",
                     "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF",
@@ -210,6 +213,7 @@ def create_ena_form(tab_type: str):
                 id=f"biosamples-password-{tab_type}",
                 type="password",
                 placeholder="Password",
+                value="",
                 style={
                     "width": "100%", "padding": "10px", "borderRadius": "8px",
                     "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF",

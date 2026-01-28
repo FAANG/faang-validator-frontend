@@ -35,6 +35,7 @@ def create_experiments():
                 id="experiments-username-ena",
                 type="text",
                 placeholder="Webin username",
+                value="",
                 style={
                     "width": "100%", "padding": "10px", "borderRadius": "8px",
                     "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF",
@@ -54,6 +55,7 @@ def create_experiments():
                 id="experiments-password-ena",
                 type="password",
                 placeholder="Password",
+                value="",
                 style={
                     "width": "100%", "padding": "10px", "borderRadius": "8px",
                     "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF",
