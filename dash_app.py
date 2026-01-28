@@ -851,8 +851,6 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
 
     all_sheets_validation_data = {}
     json_validation_results = None
-
-    print("file uploaded!!")
     try:
         try:
             response = requests.post(
@@ -889,7 +887,7 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
             if not all_sheets_validation_data and sheet_names:
                 first_sheet = sheet_names[0]
                 all_sheets_validation_data = {first_sheet: records}
-            print(json.loads(response_json))
+
     except Exception as e:
         error_div = html.Div([
             html.H5(filename),

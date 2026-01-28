@@ -381,8 +381,6 @@ def register_experiments_callbacks(app):
             return create_output([error_div]), None, None, None, None
 
         # Send data to backend for validation
-        print("file uploaded!!")
-        print(json.dumps(parsed_json))
         try:
             response = requests.post(
                 f'{BACKEND_API_URL}/validate-data',

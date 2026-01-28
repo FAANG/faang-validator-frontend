@@ -340,14 +340,9 @@ def register_analysis_callbacks(app):
 
         error_data = []
         all_sheets_validation_data = {}
-        valid_count = 0
-        invalid_count = 0
-        json_validation_results = None
-        print(json.dumps(parsed_json))
 
         try:
-            # Load from validation_results.json file instead of API call
-            
+
             try:
                 response = requests.post(
                     f'{BACKEND_API_URL}/validate-data',
@@ -1398,23 +1393,12 @@ def make_sheet_validation_panel_analysis(sheet_name: str, validation_results: di
     df_all = pd.DataFrame(sheet_records)
     if df_all.empty:
         return html.Div([html.H4("No data available", style={'textAlign': 'center', 'margin': '10px 0'})])
-    
-    # Debug: Print error_map and warning_map to help diagnose issues
-    print(f"DEBUG Analysis Tab: error_map keys: {list(error_map.keys())}")
-    print(f"DEBUG Analysis Tab: warning_map keys: {list(warning_map.keys())}")
-    print(f"DEBUG Analysis Tab: sheet_sample_names: {list(sheet_sample_names)[:5]}...")  # Show first 5
-    if 'Alias' in df_all.columns:
-        print(f"DEBUG Analysis Tab: DataFrame 'Alias' sample values: {df_all['Alias'].head().tolist()}")
-    else:
-        print(f"DEBUG Analysis Tab: Available columns: {list(df_all.columns)}")
-    
-    # Debug: Show what records we're processing
-    print(f"DEBUG Analysis Tab: Processing {len(analysis_types)} analysis types: {analysis_types}")
+
+
     for analysis_type in analysis_types:
         at_data = results_by_type.get(analysis_type, {}) or {}
         invalid_records = at_data.get('invalid', [])
         valid_records = at_data.get('valid', [])
-        print(f"DEBUG Analysis Tab: {analysis_type} - {len(valid_records)} valid, {len(invalid_records)} invalid records")
 
     # Use the same styling logic
     def _as_list(msgs):
