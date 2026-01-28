@@ -35,6 +35,7 @@ def create_experiments():
                 id="experiments-username-ena",
                 type="text",
                 placeholder="Webin username",
+                value="",
                 style={
                     "width": "100%", "padding": "10px", "borderRadius": "8px",
                     "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF",
@@ -54,6 +55,7 @@ def create_experiments():
                 id="experiments-password-ena",
                 type="password",
                 placeholder="Password",
+                value="",
                 style={
                     "width": "100%", "padding": "10px", "borderRadius": "8px",
                     "border": "1px solid #cbd5e1", "backgroundColor": "#ECF2FF",
@@ -379,8 +381,6 @@ def register_experiments_callbacks(app):
             return create_output([error_div]), None, None, None, None
 
         # Send data to backend for validation
-        print("file uploaded!!")
-        print(json.dumps(parsed_json))
         try:
             response = requests.post(
                 f'{BACKEND_API_URL}/validate-data',
@@ -663,7 +663,11 @@ def register_experiments_callbacks(app):
                         [
                             html.H3(
                                 "Submission Results",
-                                style={"marginBottom": "0"},
+                                style={
+                                    "marginBottom": "0",
+                                    "marginTop": "0",
+                                    "lineHeight": "1.2",
+                                },
                             ),
                             html.Button(
                                 "Download submission results",
