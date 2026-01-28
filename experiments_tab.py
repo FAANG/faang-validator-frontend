@@ -79,6 +79,22 @@ def create_experiments():
                     html.Div(id="experiments-submit-msg-ena", style={"marginTop": "10px"}),
                 ])
             ),
+            # Submission results panel (shown after successful ENA submission)
+            html.Div(
+                id="experiments-submission-results-panel",
+                style={
+                    "display": "none",
+                    "marginTop": "20px",
+                    "padding": "16px",
+                    "borderRadius": "8px",
+                    "border": "1px solid #cbd5e1",
+                    "backgroundColor": "#f8fafc",
+                },
+            ),
+            # Store for raw submission_results XML (for download)
+            dcc.Store(id="experiments-submission-results-store"),
+            # Download component for XML receipt
+            dcc.Download(id="experiments-submission-results-xml-download"),
         ],
         id="experiments-form-ena",
         style={"display": "none", "marginTop": "16px"},
@@ -552,6 +568,9 @@ def register_experiments_callbacks(app):
         [
             Output("experiments-submit-msg-ena", "children"),
             Output("biosamples-results-table-experiments", "children"),
+            Output("experiments-submission-results-panel", "children"),
+            Output("experiments-submission-results-panel", "style"),
+            Output("experiments-submission-results-store", "data"),
         ],
         Input("experiments-submit-btn-ena", "n_clicks"),
         State("experiments-username-ena", "value"),
@@ -566,12 +585,14 @@ def register_experiments_callbacks(app):
         if not n:
             raise PreventUpdate
 
+        hidden_style = {"display": "none"}
+
         if not v or "results" not in v:
             msg = html.Span(
                 "No validation results available. Please validate your file first.",
                 style={"color": "#c62828", "fontWeight": 500},
             )
-            return msg, dash.no_update
+            return msg, dash.no_update, dash.no_update, hidden_style, None
 
         valid_cnt, invalid_cnt = _valid_invalid_experiments_counts(v)
         if valid_cnt == 0:
@@ -579,14 +600,14 @@ def register_experiments_callbacks(app):
                 "No valid samples to submit. Please fix errors and re-validate.",
                 style={"color": "#c62828", "fontWeight": 500},
             )
-            return msg, dash.no_update
+            return msg, dash.no_update, dash.no_update, hidden_style, None
 
         if not username or not password:
             msg = html.Span(
                 "Please enter Webin username and password.",
                 style={"color": "#c62828", "fontWeight": 500},
             )
-            return msg, dash.no_update
+            return msg, dash.no_update, dash.no_update, hidden_style, None
 
         validation_results = v["results"]
 
@@ -603,19 +624,14 @@ def register_experiments_callbacks(app):
             url = f"{BACKEND_API_URL}/submit-experiment"
             r = requests.post(url, json=body, timeout=600)
 
-            if not r.ok:
-                msg = html.Span(
-                    f"Submission failed [{r.status_code}]: {r.text}",
-                    style={"color": "#c62828", "fontWeight": 500},
-                )
-                return msg, dash.no_update
-
             data = r.json() if r.content else {}
 
             success = data.get("success", False)
             message = data.get("message", "No message from server")
             submitted_count = data.get("submitted_count")
             errors = data.get("errors") or []
+            info_messages = data.get("info_messages") or []
+            submission_results_xml = data.get("submission_results") or ""
             biosamples_ids = data.get("biosamples_ids") or {}
 
             color = "#388e3c" if success else "#c62828"
@@ -626,58 +642,116 @@ def register_experiments_callbacks(app):
                     html.Br(),
                     html.Span(f"Submitted samples: {submitted_count}"),
                 ]
-            if errors:
-                msg_children += [
+
+
+            if not biosamples_ids:
+                msg_children = [
                     html.Br(),
-                    html.Ul(
-                        [html.Li(e) for e in errors],
-                        style={"marginTop": "6px", "color": "#c62828"},
-                    ),
-                ]
+                ] + msg_children
 
             msg = html.Div(msg_children, style={"color": color})
 
-            if biosamples_ids:
-                table_data = [
-                    {"Sample Descriptor": name, "BioSample ID": acc}
-                    for name, acc in biosamples_ids.items()
+
+
+            table = html.Div()
+
+
+            panel_children = []
+            if errors or info_messages or submission_results_xml:
+                panel_children = [
+                    html.Div(
+                        [
+                            html.H3(
+                                "Submission Results",
+                                style={"marginBottom": "0"},
+                            ),
+                            html.Button(
+                                "Download submission results",
+                                id="experiments-download-submission-xml-btn",
+                                n_clicks=0,
+                                style={
+                                    "backgroundColor": "#ffd740",
+                                    "color": "black",
+                                    "padding": "8px 16px",
+                                    "border": "none",
+                                    "borderRadius": "6px",
+                                    "cursor": "pointer",
+                                    "fontSize": "14px",
+                                    "marginLeft": "16px",
+                                },
+                            ),
+                        ],
+                        style={
+                            "display": "flex",
+                            "alignItems": "center",
+                            "justifyContent": "space-between",
+                            "gap": "16px",
+                            "marginBottom": "8px",
+                        },
+                    ),
                 ]
 
-                for row in table_data:
-                    acc = row.get("BioSample ID")
-                    if acc:
-                        row[
-                            "BioSample ID"
-                        ] = f"[{acc}](https://www.ebi.ac.uk/biosamples/samples/{acc})"
+                if info_messages:
+                    panel_children.append(
+                        html.Div(
+                            [
+                                html.Ul(
+                                    [html.Li(m) for m in info_messages],
+                                    style={
+                                        "marginLeft": "20px",
+                                        "color": "#475569",
+                                    },
+                                ),
+                            ]
+                        )
+                    )
 
-                table = dash_table.DataTable(
-                    data=table_data,
-                    columns=[
-                        {"name": "Sample Descriptor", "id": "Sample Descriptor"},
-                        {
-                            "name": "BioSample ID",
-                            "id": "BioSample ID",
-                            "presentation": "markdown",
-                        },
-                    ],
-                    page_size=10,
-                    style_table={"overflowX": "auto"},
-                    style_cell={"textAlign": "left"},
-                )
-            else:
-                table = html.Div(
-                    "Error: submission failed",
-                    style={"marginTop": "8px", "color": "#555"},
-                )
+                # Detailed submission errors moved into the panel, after info (no heading)
+                if errors:
+                    panel_children.append(
+                        html.Div(
+                            [
+                                html.Ul(
+                                    [html.Li(e) for e in errors],
+                                    style={
+                                        "marginLeft": "20px",
+                                        "color": "#b91c1c",
+                                    },
+                                ),
+                            ]
+                        )
+                    )
 
-            return msg, table
+            panel_style = {
+                "display": "block" if panel_children else "none",
+                "marginTop": "20px",
+                "padding": "16px",
+                "borderRadius": "8px",
+                "backgroundColor": "#f8fafc",
+            }
+
+            return msg, table, panel_children, panel_style, submission_results_xml
 
         except Exception as e:
             msg = html.Span(
                 f"Submission error: {e}",
                 style={"color": "#c62828", "fontWeight": 500},
             )
-            return msg, dash.no_update
+            return msg, dash.no_update, dash.no_update, hidden_style, None
+
+    # Download callback for ENA submission results XML (experiments tab)
+    @app.callback(
+        Output("experiments-submission-results-xml-download", "data"),
+        Input("experiments-download-submission-xml-btn", "n_clicks"),
+        State("experiments-submission-results-store", "data"),
+        prevent_initial_call=True,
+    )
+    def _download_experiments_submission_xml(n_clicks, xml_text):
+        """Trigger download of ENA submission_results XML for experiments."""
+        if not n_clicks or not xml_text:
+            raise PreventUpdate
+        # Use send_string so that text encoding is handled automatically
+        return dcc.send_string(xml_text, "experiments_submission_results.xml")
 
     # Validation results display callbacks
     @app.callback(

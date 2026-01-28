@@ -86,6 +86,21 @@ def create_biosamples_form_analysis():
                     html.Div(id="biosamples-submit-msg-ena-analysis", style={"marginTop": "10px"}),
                 ])
             ),
+            # Submission results panel (shown after submission)
+            html.Div(
+                id="analysis-submission-results-panel",
+                style={
+                    "display": "none",
+                    "marginTop": "20px",
+                    "padding": "16px",
+                    "borderRadius": "8px",
+                    "backgroundColor": "#f8fafc",
+                },
+            ),
+            # Store for raw submission_results XML (for download)
+            dcc.Store(id="analysis-submission-results-store"),
+            # Download component for XML receipt
+            dcc.Download(id="analysis-submission-results-xml-download"),
         ],
         id="biosamples-form-ena-analysis",
         style={"display": "none", "marginTop": "16px"},
@@ -566,6 +581,9 @@ def register_analysis_callbacks(app):
         [
             Output("biosamples-submit-msg-ena-analysis", "children"),
             Output("biosamples-results-table-analysis", "children"),
+            Output("analysis-submission-results-panel", "children"),
+            Output("analysis-submission-results-panel", "style"),
+            Output("analysis-submission-results-store", "data"),
         ],
         Input("biosamples-submit-btn-ena-analysis", "n_clicks"),
         State("biosamples-username-ena-analysis", "value"),
@@ -580,12 +598,14 @@ def register_analysis_callbacks(app):
         if not n:
             raise PreventUpdate
 
+        hidden_style = {"display": "none"}
+
         if not v or "results" not in v:
             msg = html.Span(
                 "No validation results available. Please validate your file first.",
                 style={"color": "#c62828", "fontWeight": 500},
             )
-            return msg, dash.no_update
+            return msg, dash.no_update, dash.no_update, hidden_style, None
 
         valid_cnt, invalid_cnt = _valid_invalid_analysis_counts(v)
         if valid_cnt == 0:
@@ -593,14 +613,14 @@ def register_analysis_callbacks(app):
                 "No valid analyses to submit. Please fix errors and re-validate.",
                 style={"color": "#c62828", "fontWeight": 500},
             )
-            return msg, dash.no_update
+            return msg, dash.no_update, dash.no_update, hidden_style, None
 
         if not username or not password:
             msg = html.Span(
                 "Please enter Webin username and password.",
                 style={"color": "#c62828", "fontWeight": 500},
             )
-            return msg, dash.no_update
+            return msg, dash.no_update, dash.no_update, hidden_style, None
 
         validation_results = v["results"]
 
@@ -622,7 +642,7 @@ def register_analysis_callbacks(app):
                     f"Submission failed [{r.status_code}]: {r.text}",
                     style={"color": "#c62828", "fontWeight": 500},
                 )
-                return msg, dash.no_update
+                return msg, dash.no_update, dash.no_update, hidden_style, None
 
             data = r.json() if r.content else {}
 
@@ -630,6 +650,8 @@ def register_analysis_callbacks(app):
             message = data.get("message", "No message from server")
             submitted_count = data.get("submitted_count")
             errors = data.get("errors") or []
+            info_messages = data.get("info_messages") or []
+            submission_results_xml = data.get("submission_results") or ""
             biosamples_ids = data.get("biosamples_ids") or {}
 
             color = "#388e3c" if success else "#c62828"
@@ -640,58 +662,108 @@ def register_analysis_callbacks(app):
                     html.Br(),
                     html.Span(f"Submitted analyses: {submitted_count}"),
                 ]
-            if errors:
-                msg_children += [
-                    html.Br(),
-                    html.Ul(
-                        [html.Li(e) for e in errors],
-                        style={"marginTop": "6px", "color": "#c62828"},
+
+
+
+            msg = html.Div(msg_children, style={"color": color})
+            table = html.Div()
+
+            # Build submission results panel content (no inline XML; info + errors + yellow button)
+            panel_children = []
+            if errors or info_messages or submission_results_xml:
+                panel_children = [
+                    html.Div(
+                        [
+                            html.H3(
+                                "Submission Results",
+                                style={"marginBottom": "0"},
+                            ),
+                            html.Button(
+                                "Download submission results",
+                                id="analysis-download-submission-xml-btn",
+                                n_clicks=0,
+                                style={
+                                    "backgroundColor": "#ffd740",
+                                    "color": "black",
+                                    "padding": "8px 16px",
+                                    "border": "none",
+                                    "borderRadius": "6px",
+                                    "cursor": "pointer",
+                                    "fontSize": "14px",
+                                    "marginLeft": "16px",
+                                },
+                            ),
+                        ],
+                        style={
+                            "display": "flex",
+                            "alignItems": "center",
+                            "justifyContent": "space-between",
+                            "gap": "16px",
+                            "marginBottom": "8px",
+                        },
                     ),
                 ]
 
-            msg = html.Div(msg_children, style={"color": color})
+                if info_messages:
+                    panel_children.append(
+                        html.Div(
+                            [
+                                html.Ul(
+                                    [html.Li(m) for m in info_messages],
+                                    style={
+                                        "marginLeft": "20px",
+                                        "color": "#475569",
+                                    },
+                                ),
+                            ]
+                        )
+                    )
 
-            if biosamples_ids:
-                table_data = [
-                    {"Analysis Name": name, "BioSample ID": acc}
-                    for name, acc in biosamples_ids.items()
-                ]
+                # Detailed submission errors after info (no heading)
+                if errors:
+                    panel_children.append(
+                        html.Div(
+                            [
+                                html.Ul(
+                                    [html.Li(e) for e in errors],
+                                    style={
+                                        "marginLeft": "20px",
+                                        "color": "#b91c1c",
+                                    },
+                                ),
+                            ]
+                        )
+                    )
 
-                for row in table_data:
-                    acc = row.get("BioSample ID")
-                    if acc:
-                        row[
-                            "BioSample ID"
-                        ] = f"[{acc}](https://wwwdev.ebi.ac.uk/biosamples/samples/{acc})"
+            panel_style = {
+                "display": "block" if panel_children else "none",
+                "marginTop": "20px",
+                "padding": "16px",
+                "borderRadius": "8px",
+                "backgroundColor": "#f8fafc",
+            }
 
-                table = dash_table.DataTable(
-                    data=table_data,
-                    columns=[
-                        {"name": "Analysis Name", "id": "Analysis Name"},
-                        {
-                            "name": "BioSample ID",
-                            "id": "BioSample ID",
-                            "presentation": "markdown",
-                        },
-                    ],
-                    page_size=10,
-                    style_table={"overflowX": "auto"},
-                    style_cell={"textAlign": "left"},
-                )
-            else:
-                table = html.Div(
-                    "No BioSample accessions returned.",
-                    style={"marginTop": "8px", "color": "#555"},
-                )
-
-            return msg, table
+            return msg, table, panel_children, panel_style, submission_results_xml
 
         except Exception as e:
             msg = html.Span(
                 f"Submission error: {e}",
                 style={"color": "#c62828", "fontWeight": 500},
             )
-            return msg, dash.no_update
+            return msg, dash.no_update, dash.no_update, hidden_style, None
+
+    # Download callback for submission results XML (analysis tab)
+    @app.callback(
+        Output("analysis-submission-results-xml-download", "data"),
+        Input("analysis-download-submission-xml-btn", "n_clicks"),
+        State("analysis-submission-results-store", "data"),
+        prevent_initial_call=True,
+    )
+    def _download_analysis_submission_xml(n_clicks, xml_text):
+        """Trigger download of ENA submission_results XML for analysis."""
+        if not n_clicks or not xml_text:
+            raise PreventUpdate
+        return dcc.send_string(xml_text, "analysis_submission_results.xml")
 
     # Validation results display callbacks
     @app.callback(

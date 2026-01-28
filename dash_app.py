@@ -484,6 +484,7 @@ def biosamples_form():
 
 
 app.layout = html.Div([
+    dcc.Location(id="url", refresh=False),
     html.Div([
         html.H1("FAANG Validation"),
         html.Div(id='dummy-output-for-reset'),
@@ -541,8 +542,11 @@ app.layout = html.Div([
                 )
             ]
         ),
-        dcc.Tabs([
-            dcc.Tab(label='Samples', style={
+        dcc.Tabs(
+            id="main-tabs",
+            value="samples",
+            children=[
+            dcc.Tab(label='Samples', value="samples", style={
                 'borderTop': 'none',
                 'borderRight': 'none',
                 'borderBottom': 'none',
@@ -571,7 +575,7 @@ app.layout = html.Div([
                     }, children=[
                     create_tab_content('samples')
                 ]),
-            dcc.Tab(label='Experiments', style={
+            dcc.Tab(label='Experiments', value="experiments", style={
                 'borderTop': 'none',
                 'borderRight': 'none',
                 'borderBottom': 'none',
@@ -600,7 +604,7 @@ app.layout = html.Div([
                     }, children=[
                     create_tab_content('experiments')
                 ]),
-            dcc.Tab(label='Analysis', style={
+            dcc.Tab(label='Analysis', value="analysis", style={
                 'borderTop': 'none',
                 'borderRight': 'none',
                 'borderBottom': 'none',
@@ -639,6 +643,46 @@ app.layout = html.Div([
             colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"})
     ], className='container')
 ])
+
+
+@app.callback(
+    [Output("main-tabs", "value"), Output("url", "search")],
+    [Input("url", "search"), Input("main-tabs", "value")],
+)
+def _sync_tab_with_url(search, tab_value):
+    """
+    Keep main tab selection and ?tab= query parameter in sync without cycles.
+
+    - If URL changes (?tab=...), update the active tab but leave URL as-is.
+    - If user clicks a tab, update the URL's ?tab= parameter.
+    """
+    from urllib.parse import parse_qs, urlencode
+    from dash import callback_context
+
+    triggered = callback_context.triggered[0]["prop_id"] if callback_context.triggered else ""
+
+    # Helper: parse tab from current URL
+    def _tab_from_search(s):
+        if not s:
+            return "samples"
+        try:
+            params = parse_qs(s.lstrip("?"))
+            t = (params.get("tab") or ["samples"])[0]
+            return t if t in {"samples", "experiments", "analysis"} else "samples"
+        except Exception:
+            return "samples"
+
+    # URL changed -> drive tab, don't touch URL
+    if triggered.startswith("url."):
+        new_tab = _tab_from_search(search)
+        return new_tab, dash.no_update
+
+    # Tab clicked -> drive URL
+    current = search.lstrip("?") if search else ""
+    params = parse_qs(current)
+    params["tab"] = [tab_value or "samples"]
+    new_search = "?" + urlencode(params, doseq=True)
+    return tab_value or "samples", new_search
 
 
 @app.callback(
