@@ -523,9 +523,14 @@ app.layout = html.Div([
         dcc.Store(id='error-popup-data-analysis', data={'visible': False, 'column': '', 'error': ''}),
         dcc.Store(id='active-sheet-analysis', data=None),
         dcc.Store(id='stored-json-validation-results-analysis', data=None),
+        # Stores for submission XML download
+        dcc.Store(id="samples-submission-results-store"),
+        dcc.Store(id="experiments-submission-results-store"),
+        dcc.Store(id="analysis-submission-results-store"),
         dcc.Download(id='download-table-csv'),
         dcc.Download(id='download-table-csv-analysis'),
         dcc.Download(id='download-table-csv-experiments'),
+        dcc.Download(id="samples-submission-results-xml-download"),
         dcc.Interval(id="submission-poller", interval=2000, n_intervals=0, disabled=True),
         html.Div(
             id='error-popup-container',
@@ -2419,6 +2424,9 @@ def _disable_submit(u, p, v):
     [
         Output("biosamples-submit-msg-samples", "children"),
         Output("biosamples-results-table-samples", "children"),
+        Output("samples-submission-results-panel", "children"),
+        Output("samples-submission-results-panel", "style"),
+        Output("samples-submission-results-store", "data"),
     ],
     Input("biosamples-submit-btn-samples", "n_clicks"),
     State("biosamples-username-samples", "value"),
@@ -2432,12 +2440,14 @@ def _submit_to_biosamples(n, username, password, env, action, v):
     if not n:
         raise PreventUpdate
 
+    hidden_style = {"display": "none"}
+
     if not v or "results" not in v:
         msg = html.Span(
             "No validation results available. Please validate your file first.",
             style={"color": "#c62828", "fontWeight": 500},
         )
-        return msg, dash.no_update
+        return msg, dash.no_update, dash.no_update, hidden_style, None
 
     valid_cnt, invalid_cnt = _valid_invalid_counts(v)
     if valid_cnt == 0:
@@ -2445,14 +2455,14 @@ def _submit_to_biosamples(n, username, password, env, action, v):
             "No valid samples to submit. Please fix errors and re-validate.",
             style={"color": "#c62828", "fontWeight": 500},
         )
-        return msg, dash.no_update
+        return msg, dash.no_update, dash.no_update, hidden_style, None
 
     if not username or not password:
         msg = html.Span(
             "Please enter Webin username and password.",
             style={"color": "#c62828", "fontWeight": 500},
         )
-        return msg, dash.no_update
+        return msg, dash.no_update, dash.no_update, hidden_style, None
 
     validation_results = v["results"]
 
@@ -2473,7 +2483,7 @@ def _submit_to_biosamples(n, username, password, env, action, v):
                 f"Submission failed [{r.status_code}]: {r.text}",
                 style={"color": "#c62828", "fontWeight": 500},
             )
-            return msg, dash.no_update
+            return msg, dash.no_update, dash.no_update, hidden_style, None
 
         data = r.json() if r.content else {}
 
@@ -2481,6 +2491,8 @@ def _submit_to_biosamples(n, username, password, env, action, v):
         message = data.get("message", "No message from server")
         submitted_count = data.get("submitted_count")
         errors = data.get("errors") or []
+        info_messages = data.get("info_messages") or []
+        submission_results_xml = data.get("submission_results") or ""
         biosamples_ids = data.get("biosamples_ids") or {}
 
         color = "#388e3c" if success else "#c62828"
@@ -2491,14 +2503,16 @@ def _submit_to_biosamples(n, username, password, env, action, v):
                 html.Br(),
                 html.Span(f"Submitted samples: {submitted_count}"),
             ]
-        if errors:
-            msg_children += [
-                html.Br(),
-                html.Ul(
-                    [html.Li(e) for e in errors],
-                    style={"marginTop": "6px", "color": "#c62828"},
+
+        # If no BioSample IDs were returned, surface a clear red error immediately
+        if not biosamples_ids:
+            msg_children = [
+                html.Span(
+                    "Error: submission failed",
+                    style={"fontWeight": 600, "color": "#c62828"},
                 ),
-            ]
+                html.Br(),
+            ] + msg_children
 
         msg = html.Div(msg_children, style={"color": color})
 
@@ -2529,20 +2543,62 @@ def _submit_to_biosamples(n, username, password, env, action, v):
                 style_table={"overflowX": "auto"},
                 style_cell={"textAlign": "left"},
             )
-        else:
-            table = html.Div(
-                "No BioSample accessions returned.",
-                style={"marginTop": "8px", "color": "#555"},
-            )
+        # Only show the Submission Results panel when we also have a table
+        panel_children = []
+        if biosamples_ids:
+            panel_children = [
+                html.Div(
+                    [
+                        html.H3(
+                            "Submission Results",
+                            style={
+                                "marginBottom": "0",
+                                "marginTop": "0",
+                                "lineHeight": "1.2",
+                            },
+                        ),
+                        html.Button(
+                            "Download submission results",
+                            id="samples-download-submission-xml-btn",
+                            n_clicks=0,
+                            style={
+                                "backgroundColor": "#ffd740",
+                                "color": "black",
+                                "padding": "8px 16px",
+                                "border": "none",
+                                "borderRadius": "6px",
+                                "cursor": "pointer",
+                                "fontSize": "14px",
+                                "marginLeft": "16px",
+                            },
+                        ),
+                    ],
+                    style={
+                        "display": "flex",
+                        "alignItems": "center",
+                        "justifyContent": "space-between",
+                        "gap": "16px",
+                        "marginBottom": "8px",
+                    },
+                ),
+            ]
 
-        return msg, table
+        panel_style = {
+            "display": "block" if panel_children else "none",
+            "marginTop": "20px",
+            "padding": "16px",
+            "borderRadius": "8px",
+            "backgroundColor": "#f8fafc",
+        }
+
+        return msg, table, panel_children, panel_style, submission_results_xml
 
     except Exception as e:
         msg = html.Span(
             f"Submission error: {e}",
             style={"color": "#c62828", "fontWeight": 500},
         )
-        return msg, dash.no_update
+        return msg, dash.no_update, dash.no_update, hidden_style, None
 
 
 @app.callback(
@@ -2567,6 +2623,20 @@ app.clientside_callback(
     [Input("reset-button-samples", "n_clicks")],
     prevent_initial_call=True,
 )
+
+
+@app.callback(
+    Output("samples-submission-results-xml-download", "data"),
+    Input("samples-download-submission-xml-btn", "n_clicks"),
+    State("samples-submission-results-store", "data"),
+    prevent_initial_call=True,
+)
+def _download_samples_submission_xml(n_clicks, xml_text):
+    """Trigger download of ENA submission_results XML for samples."""
+    if not n_clicks:
+        raise PreventUpdate
+    # Even if submission_results is empty, allow a (possibly empty) text file to download
+    return dcc.send_string(xml_text or "", "samples_submission_results.txt")
 
 # Clientside callback to style tab labels when validation results are updated
 app.clientside_callback(

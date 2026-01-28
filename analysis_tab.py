@@ -673,7 +673,11 @@ def register_analysis_callbacks(app):
                         [
                             html.H3(
                                 "Submission Results",
-                                style={"marginBottom": "0"},
+                                style={
+                                    "marginBottom": "0",
+                                    "marginTop": "0",
+                                    "lineHeight": "1.2",
+                                },
                             ),
                             html.Button(
                                 "Download submission results",

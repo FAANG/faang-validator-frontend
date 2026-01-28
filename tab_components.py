@@ -297,6 +297,8 @@ def create_tab_content(tab_type: str):
         create_file_upload_area(tab_type),
         create_validation_results_area(tab_type),
         biosamples_form,
+        # Submission results panel + XML download are added per-tab where needed
+        html.Div(id=f"{tab_type}-submission-results-panel"),
         html.Div(id=f"biosamples-results-table-{tab_type}"),  # Results table at the end
     ])
 
