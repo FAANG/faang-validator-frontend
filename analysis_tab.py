@@ -327,13 +327,16 @@ def register_analysis_callbacks(app):
         [Input('validate-button-analysis', 'n_clicks')],
         [State('stored-file-data-analysis', 'data'),
          State('stored-filename-analysis', 'data'),
+         State('biosamples-action-analysis', 'value'),
          State('output-data-upload-analysis', 'children'),
          State('stored-all-sheets-data-analysis', 'data'),
          State('stored-sheet-names-analysis', 'data'),
          State('stored-parsed-json-analysis', 'data')],
         prevent_initial_call=True
     )
-    def validate_data_analysis(n_clicks, contents, filename, current_children, all_sheets_data, sheet_names, parsed_json):
+
+    def validate_data_analysis(n_clicks, contents, filename, action, current_children, all_sheets_data, sheet_names,
+                               parsed_json):
         """Validate data for Analysis tab with robust response handling"""
         if n_clicks is None or parsed_json is None:
             return current_children if current_children else html.Div([]), None
@@ -346,7 +349,7 @@ def register_analysis_callbacks(app):
             try:
                 response = requests.post(
                     f'{BACKEND_API_URL}/validate-data',
-                    json={"data": parsed_json,"data_type":"analysis"},
+                    json={"data": parsed_json, "data_type": "analysis", "action": action},
                     headers={'accept': 'application/json', 'Content-Type': 'application/json'}
                 )
                 if response.status_code != 200:

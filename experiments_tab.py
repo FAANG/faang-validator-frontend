@@ -302,10 +302,11 @@ def register_experiments_callbacks(app):
         [Input('validate-button-experiments', 'n_clicks')],
         [State('stored-file-data-experiments', 'data'),
          State('stored-filename-experiments', 'data'),
+         State('biosamples-action-experiments', 'value'),
          State('output-data-upload-experiments', 'children')],
         prevent_initial_call=True
     )
-    def validate_data_experiments(n_clicks, contents, filename, current_children):
+    def validate_data_experiments(n_clicks, contents, filename, action, current_children):
         """
         Validate data for Experiments tab.
         This callback now handles file parsing and JSON conversion, which was
@@ -384,7 +385,7 @@ def register_experiments_callbacks(app):
         try:
             response = requests.post(
                 f'{BACKEND_API_URL}/validate-data',
-                json={"data": parsed_json, "data_type": "experiment"},
+                json={"data": parsed_json, "data_type": "experiment", "action": action},
                 headers={'accept': 'application/json', 'Content-Type': 'application/json'}
             )
 
