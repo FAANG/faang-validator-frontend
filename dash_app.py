@@ -1448,7 +1448,10 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
                 value=sheet_name,
                 id={'type': 'sheet-validation-tab', 'sheet_name': sheet_name},
                 style={
-                    'border': 'none',
+                    'borderTop': 'none',
+                    'borderRight': 'none',
+                    'borderBottom': 'none',
+                    'borderLeft': 'none',
                     'padding': '12px 24px',
                     'marginRight': '4px',
                     'backgroundColor': '#f5f5f5',
@@ -1459,8 +1462,10 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
                     'cursor': 'pointer'
                 },
                 selected_style={
-                    'border': 'none',
+                    'borderTop': 'none',
+                    'borderRight': 'none',
                     'borderBottom': '3px solid #4CAF50',
+                    'borderLeft': 'none',
                     'backgroundColor': '#ffffff',
                     'color': '#666',
                     'padding': '12px 24px',
@@ -1486,8 +1491,10 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
         value=sheets_with_data[0] if sheets_with_data else None,
         children=sheet_tabs,
         style={
-            'border': 'none',
+            'borderTop': 'none',
+            'borderRight': 'none',
             'borderBottom': '2px solid #e0e0e0',
+            'borderLeft': 'none',
             'marginBottom': '20px'
         },
         colors={
@@ -2209,7 +2216,14 @@ def create_sheet_tabs_ui(sheet_names, active_sheet, all_sheets_data=None):
                     }
                 ) for i, sheet_name in enumerate(filtered_sheet_names)
             ],
-            style={'width': '100%', 'marginBottom': '20px', 'border': 'none'},
+            style={
+                'width': '100%',
+                'marginBottom': '20px',
+                'borderTop': 'none',
+                'borderRight': 'none',
+                'borderBottom': 'none',
+                'borderLeft': 'none'
+            },
             colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"}
         )
     ], style={'marginTop': '30px', 'borderTop': '1px solid #ddd', 'paddingTop': '20px'})
@@ -2591,7 +2605,7 @@ def _submit_to_biosamples(n, username, password, env, action, v):
             "backgroundColor": "#f8fafc",
         }
 
-        return msg, table, panel_children, panel_style, submission_results_xml
+        return msg, table, panel_children, panel_style, biosamples_ids
 
     except Exception as e:
         msg = html.Span(
@@ -2631,12 +2645,19 @@ app.clientside_callback(
     State("samples-submission-results-store", "data"),
     prevent_initial_call=True,
 )
-def _download_samples_submission_xml(n_clicks, xml_text):
-    """Trigger download of ENA submission_results XML for samples."""
+def _download_samples_submission_tsv(n_clicks, store_data):
+    """Trigger download of BioSample IDs as TSV for samples tab."""
     if not n_clicks:
         raise PreventUpdate
-    # Even if submission_results is empty, allow a (possibly empty) text file to download
-    return dcc.send_string(xml_text or "", "samples_submission_results.txt")
+    biosamples_ids = store_data if isinstance(store_data, dict) else {}
+    lines = []
+    for name, acc in (biosamples_ids or {}).items():
+        # Escape TSV: replace tabs and newlines in values
+        name_safe = str(name).replace("\t", " ").replace("\n", " ")
+        acc_safe = str(acc).replace("\t", " ").replace("\n", " ")
+        lines.append(f"{name_safe}\t{acc_safe}")
+    tsv_content = "\n".join(lines)
+    return dcc.send_string(tsv_content, "submission_results.txt")
 
 # Clientside callback to style tab labels when validation results are updated
 app.clientside_callback(
