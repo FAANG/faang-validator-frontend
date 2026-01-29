@@ -55,11 +55,8 @@ def process_file_upload(contents: str, filename: str, process_headers_func, buil
             original_headers = [str(col) for col in df_sheet.columns]
             processed_headers = process_headers_func(original_headers)
 
-            # Prepare rows data
-            rows = []
-            for _, row in df_sheet.iterrows():
-                row_list = [row[col] for col in df_sheet.columns]
-                rows.append(row_list)
+            # Prepare rows data (values.tolist() is faster than iterrows() for large sheets)
+            rows = df_sheet.values.tolist()
 
             # Apply build_json_data rules
             parsed_json_records = build_json_data_func(processed_headers, rows)

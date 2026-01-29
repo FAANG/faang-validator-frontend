@@ -15,6 +15,7 @@ import dash
 import os
 
 from file_processor import process_headers, build_json_data
+from validation_utils import get_all_errors_and_warnings
 
 
 def create_biosamples_form_analysis():
@@ -113,59 +114,6 @@ BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
                                  'https://faang-validator-backend-service-964531885708.europe-west2.run.app')
 
 
-def get_all_errors_and_warnings(record):
-    """Extract all errors and warnings from a validation record."""
-    import re
-    errors = {}
-    warnings = {}
-
-    if 'errors' in record and record['errors']:
-        if 'field_errors' in record['errors']:
-            for field, messages in record['errors']['field_errors'].items():
-                errors[field] = messages
-        if 'relationship_errors' in record['errors']:
-            for message in record['errors']['relationship_errors']:
-                field_to_blame = 'general'
-                data = record.get('data', {})
-                if 'Child Of' in data and data.get('Child Of'):
-                    field_to_blame = 'Child Of'
-                elif 'Derived From' in data and data.get('Derived From'):
-                    field_to_blame = 'Derived From'
-                if field_to_blame not in errors:
-                    errors[field_to_blame] = []
-                errors[field_to_blame].append(message)
-
-    if 'field_warnings' in record and record['field_warnings']:
-        for field, messages in record['field_warnings'].items():
-            warnings[field] = messages
-
-    if 'ontology_warnings' in record and record['ontology_warnings']:
-        for message in record['ontology_warnings']:
-            match = re.search(r"in field '([^']*)'", message)
-            if match:
-                field = match.group(1)
-                if field not in warnings:
-                    warnings[field] = []
-                warnings[field].append(message)
-            else:
-                if 'general' not in warnings:
-                    warnings['general'] = []
-                warnings['general'].append(message)
-
-    if 'relationship_errors' in record and record['relationship_errors']:
-        field_to_blame = 'general'
-        data = record.get('data', {})
-        if 'Child Of' in data and data.get('Child Of'):
-            field_to_blame = 'Child Of'
-        elif 'Derived From' in data and data.get('Derived From'):
-            field_to_blame = 'Derived From'
-        if field_to_blame not in warnings:
-            warnings[field_to_blame] = []
-        warnings[field_to_blame].extend(record['relationship_errors'])
-
-    return errors, warnings
-
-
 def _resolve_col(field, cols):
     """Resolve field name to column name (case-insensitive)."""
     if not field:
@@ -254,11 +202,7 @@ def register_analysis_callbacks(app):
 
                 original_headers = [str(col) for col in df_sheet.columns]
                 processed_headers = process_headers(original_headers)
-
-                rows = []
-                for _, row in df_sheet.iterrows():
-                    row_list = [row[col] for col in df_sheet.columns]
-                    rows.append(row_list)
+                rows = df_sheet.values.tolist()
 
                 parsed_json_records = build_json_data(processed_headers, rows, sheet_name=sheet)
                 parsed_json_data[sheet] = parsed_json_records

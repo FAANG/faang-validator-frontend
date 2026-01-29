@@ -328,8 +328,8 @@ def read_and_convert_excel(contents: str) -> Dict[str, Any]:
         original_headers = [str(col) for col in df_sheet.columns]
         processed_headers = process_headers(original_headers)
 
-        # Prepare rows data
-        rows = [row.tolist() for _, row in df_sheet.iterrows()]
+        # Prepare rows data (values.tolist() is faster than iterrows() for large sheets)
+        rows = df_sheet.values.tolist()
 
         # Convert to JSON format for backend
         parsed_json_records = build_json_data(processed_headers, rows, sheet_name=sheet)

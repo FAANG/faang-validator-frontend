@@ -17,6 +17,7 @@ import dash
 import os
 
 from file_processor import process_headers, build_json_data
+from validation_utils import get_all_errors_and_warnings
 
 
 def create_experiments():
@@ -105,88 +106,6 @@ def create_experiments():
 # Backend API URL - can be configured via environment variable
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
                                  'https://faang-validator-backend-service-964531885708.europe-west2.run.app')
-
-
-def get_all_errors_and_warnings(record):
-    errors = {}
-    warnings = {}
-
-    # From 'errors' object
-    if 'errors' in record and record['errors']:
-        # Handle errors.errors array (e.g., "Geographic Location: Field required")
-        if 'errors' in record['errors'] and isinstance(record['errors']['errors'], list):
-            for error_msg in record['errors']['errors']:
-                # Parse messages like "Geographic Location: Field required"
-                if ':' in error_msg:
-                    parts = error_msg.split(':', 1)
-                    field = parts[0].strip()
-                    message = parts[1].strip() if len(parts) > 1 else error_msg
-                    if field not in errors:
-                        errors[field] = []
-                    errors[field].append(message)
-                else:
-                    # If no field name found, add to 'general'
-                    if 'general' not in errors:
-                        errors['general'] = []
-                    errors['general'].append(error_msg)
-
-        if 'field_errors' in record['errors']:
-            for field, messages in record['errors']['field_errors'].items():
-                if field not in errors:
-                    errors[field] = []
-                # Ensure messages is a list
-                if isinstance(messages, list):
-                    errors[field].extend(messages)
-                else:
-                    errors[field].append(messages)
-        if 'relationship_errors' in record['errors']:
-            for message in record['errors']['relationship_errors']:
-                field_to_blame = 'general'
-                data = record.get('data', {})
-                if 'Child Of' in data and data.get('Child Of'):
-                    field_to_blame = 'Child Of'
-                elif 'Derived From' in data and data.get('Derived From'):
-                    field_to_blame = 'Derived From'
-
-                if field_to_blame not in warnings:
-                    warnings[field_to_blame] = []
-                warnings[field_to_blame].append(message)
-
-    # From 'field_warnings'
-    if 'field_warnings' in record and record['field_warnings']:
-        for field, messages in record['field_warnings'].items():
-            warnings[field] = messages
-
-    # From 'ontology_warnings'
-    if 'ontology_warnings' in record and record['ontology_warnings']:
-        for message in record['ontology_warnings']:
-            match = re.search(r"in field '([^']*)'", message)
-            if match:
-                field = match.group(1)
-                if field not in warnings:
-                    warnings[field] = []
-                warnings[field].append(message)
-            else:
-                # Generic warning if field not found
-                if 'general' not in warnings:
-                    warnings['general'] = []
-                warnings['general'].append(message)
-
-    # From 'relationship_errors' (top level - treat as warnings, yellow highlighting)
-    if 'relationship_errors' in record and record['relationship_errors']:
-        # Try to associate with 'Child Of' or 'Derived From'
-        field_to_blame = 'general'
-        data = record.get('data', {})
-        if 'Child Of' in data and data.get('Child Of'):
-            field_to_blame = 'Child Of'
-        elif 'Derived From' in data and data.get('Derived From'):
-            field_to_blame = 'Derived From'
-
-        if field_to_blame not in warnings:
-            warnings[field_to_blame] = []
-        warnings[field_to_blame].extend(record['relationship_errors'])
-
-    return errors, warnings
 
 
 def _warnings_by_field(warnings_list):
@@ -387,17 +306,15 @@ def register_experiments_callbacks(app):
                 json={"data": parsed_json, "data_type": "experiment"},
                 headers={'accept': 'application/json', 'Content-Type': 'application/json'}
             )
-
             if response.status_code != 200:
-                raise Exception(f"JSON endpoint returned {response.status_code}")
-        except Exception as json_err:
-            # Fallback: if JSON endpoint doesn't exist, send as file
-            print(f"JSON endpoint failed: {json_err}")
-        if response.status_code == 200:
+                raise Exception(f"Error {response.status_code}: {response.text}")
             response_json = response.json()
-
-        else:
-            raise Exception(f"Error {response.status_code}: {response.text}")
+        except Exception as api_err:
+            error_div = html.Div([
+                html.H5(filename),
+                html.P(f"Error connecting to backend: {str(api_err)}", style={'color': 'red'})
+            ])
+            return create_output([error_div]), None, None, None, None
 
         # Process validation response
         # (The logic for handling different response formats remains the same)
