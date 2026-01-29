@@ -772,13 +772,14 @@ def show_and_enable_buttons(file_data):
     [Input('validate-button-samples', 'n_clicks')],
     [State('stored-file-data', 'data'),
      State('stored-filename', 'data'),
+     State('biosamples-action-samples', 'value'),
      State('output-data-upload-samples', 'children'),
      State('stored-all-sheets-data', 'data'),
      State('stored-sheet-names', 'data'),
      State('stored-parsed-json', 'data')],
     prevent_initial_call=True
 )
-def validate_data(n_clicks, contents, filename, current_children, all_sheets_data, sheet_names, parsed_json):
+def validate_data(n_clicks, contents, filename, action, current_children, all_sheets_data, sheet_names, parsed_json):
     if n_clicks is None or parsed_json is None:
         return current_children if current_children else html.Div([]), None
 
@@ -792,7 +793,7 @@ def validate_data(n_clicks, contents, filename, current_children, all_sheets_dat
         try:
             response = requests.post(
                 f'{BACKEND_API_URL}/validate-data',
-                json={"data": parsed_json,"data_type":"sample"},
+                json={"data": parsed_json, "data_type": "sample", "action": action},
                 headers={'accept': 'application/json', 'Content-Type': 'application/json'}
             )
 
