@@ -2542,7 +2542,7 @@ def _submit_to_biosamples(n, username, password, env, action, v):
                 if acc:
                     row[
                         "BioSample ID"
-                    ] = f"[{acc}](https://wwwdev.ebi.ac.uk/biosamples/samples/{acc})"
+                    ] = f"[{acc}](https://www.ebi.ac.uk/biosamples/samples/{acc})"
 
             table = dash_table.DataTable(
                 data=table_data,
