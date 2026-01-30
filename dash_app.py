@@ -2532,6 +2532,12 @@ def _submit_to_biosamples(n, username, password, env, action, v):
         msg = html.Div(msg_children, style={"color": color})
 
         if biosamples_ids:
+            biosamples_base_url = (
+                "https://wwwdev.ebi.ac.uk/biosamples/samples"
+                if env == "test"
+                else "https://www.ebi.ac.uk/biosamples/samples"
+            )
+
             table_data = [
                 {"Sample Name": name, "BioSample ID": acc}
                 for name, acc in biosamples_ids.items()
@@ -2540,9 +2546,7 @@ def _submit_to_biosamples(n, username, password, env, action, v):
             for row in table_data:
                 acc = row.get("BioSample ID")
                 if acc:
-                    row[
-                        "BioSample ID"
-                    ] = f"[{acc}](https://www.ebi.ac.uk/biosamples/samples/{acc})"
+                    row["BioSample ID"] = f"[{acc}]({biosamples_base_url}/{acc})"
 
             table = dash_table.DataTable(
                 data=table_data,
