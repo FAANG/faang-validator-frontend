@@ -629,7 +629,7 @@ def register_analysis_callbacks(app):
             "original_data": original_data,
             "webin_username": username,
             "webin_password": password,
-            "mode": "test",
+            "mode": "prod",
             "action": action,
         }
 

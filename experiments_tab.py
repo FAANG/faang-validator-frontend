@@ -617,7 +617,7 @@ def register_experiments_callbacks(app):
             "original_data": original_data,
             "webin_username": username,
             "webin_password": password,
-            "mode": "test",  # Default to test server
+            "mode": "prod",
             "action": action,
         }
 
