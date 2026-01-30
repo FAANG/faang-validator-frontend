@@ -2798,6 +2798,32 @@ register_experiments_callbacks(app)
 from analysis_tab import register_analysis_callbacks
 register_analysis_callbacks(app)
 
+# ============================================================================
+# SEND TAB CHANGE MESSAGE TO PARENT ANGULAR APP (for iframe integration)
+# ============================================================================
+app.clientside_callback(
+    """
+    function(tab_value) {
+        // Send message to parent window (Angular app) when tab changes
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage(
+                {
+                    type: 'TAB_CHANGE',
+                    tab: tab_value  // 'samples', 'experiments', or 'analysis'
+                },
+                'https://data.faang.org'
+            );
+            console.log('[Dash] Sent TAB_CHANGE message to parent:', tab_value);
+        }
+
+        // Return no update (we're just sending a message, not updating anything in Dash)
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('main-tabs', 'id', allow_duplicate=True),  # Dummy output
+    [Input('main-tabs', 'value')],
+    prevent_initial_call=True
+)
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8050))
