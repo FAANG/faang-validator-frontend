@@ -244,7 +244,7 @@ def get_all_errors_and_warnings(record):
                     if 'general' not in errors:
                         errors['general'] = []
                     errors['general'].append(error_msg)
-        
+
         if 'field_errors' in record['errors']:
             for field, messages in record['errors']['field_errors'].items():
                 if field not in errors:
@@ -440,12 +440,12 @@ def _count_valid_invalid_for_type(validation_results_dict, sample_type):
 
         sample_results = validation_data.get('sample_results', {}) or {}
         st_data = sample_results.get(sample_type, {}) or {}
-        
+
         # Use summary field for counts (more reliable than counting records)
         summary = st_data.get('summary', {}) or {}
         valid_count = summary.get('valid', 0)
         invalid_count = summary.get('invalid', 0)
-        
+
         return int(valid_count), int(invalid_count)
 
     except Exception:
@@ -524,9 +524,8 @@ app.layout = html.Div([
         dcc.Store(id='active-sheet-analysis', data=None),
         dcc.Store(id='stored-json-validation-results-analysis', data=None),
         # Stores for submission XML download
+        # Samples store is defined here; experiments/analysis define their own stores
         dcc.Store(id="samples-submission-results-store"),
-        dcc.Store(id="experiments-submission-results-store"),
-        dcc.Store(id="analysis-submission-results-store"),
         dcc.Download(id='download-table-csv'),
         dcc.Download(id='download-table-csv-analysis'),
         dcc.Download(id='download-table-csv-experiments'),
@@ -551,100 +550,100 @@ app.layout = html.Div([
             id="main-tabs",
             value="samples",
             children=[
-            dcc.Tab(label='Samples', value="samples", style={
+                dcc.Tab(label='Samples', value="samples", style={
+                    'borderTop': 'none',
+                    'borderRight': 'none',
+                    'borderBottom': 'none',
+                    'borderLeft': 'none',
+                    'padding': '12px 24px',
+                    'marginRight': '4px',
+                    'backgroundColor': '#f5f5f5',
+                    'color': '#666',
+                    'borderRadius': '8px 8px 0 0',
+                    'fontWeight': '500',
+                    'transition': 'all 0.3s ease',
+                    'cursor': 'pointer'
+                },
+                        selected_style={
+                            'borderTop': 'none',
+                            'borderRight': 'none',
+                            'borderLeft': 'none',
+                            'borderBottom': '3px solid #4CAF50',
+                            'backgroundColor': '#ffffff',
+                            'color': '#4CAF50',
+                            'padding': '12px 24px',
+                            'marginRight': '4px',
+                            'borderRadius': '8px 8px 0 0',
+                            'fontWeight': 'bold',
+                            'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
+                        }, children=[
+                        create_tab_content('samples')
+                    ]),
+                dcc.Tab(label='Experiments', value="experiments", style={
+                    'borderTop': 'none',
+                    'borderRight': 'none',
+                    'borderBottom': 'none',
+                    'borderLeft': 'none',
+                    'padding': '12px 24px',
+                    'marginRight': '4px',
+                    'backgroundColor': '#f5f5f5',
+                    'color': '#666',
+                    'borderRadius': '8px 8px 0 0',
+                    'fontWeight': '500',
+                    'transition': 'all 0.3s ease',
+                    'cursor': 'pointer'
+                },
+                        selected_style={
+                            'borderTop': 'none',
+                            'borderRight': 'none',
+                            'borderLeft': 'none',
+                            'borderBottom': '3px solid #4CAF50',
+                            'backgroundColor': '#ffffff',
+                            'color': '#4CAF50',
+                            'padding': '12px 24px',
+                            'marginRight': '4px',
+                            'borderRadius': '8px 8px 0 0',
+                            'fontWeight': 'bold',
+                            'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
+                        }, children=[
+                        create_tab_content('experiments')
+                    ]),
+                dcc.Tab(label='Analysis', value="analysis", style={
+                    'borderTop': 'none',
+                    'borderRight': 'none',
+                    'borderBottom': 'none',
+                    'borderLeft': 'none',
+                    'padding': '12px 24px',
+                    'marginRight': '4px',
+                    'backgroundColor': '#f5f5f5',
+                    'color': '#666',
+                    'borderRadius': '8px 8px 0 0',
+                    'fontWeight': '500',
+                    'transition': 'all 0.3s ease',
+                    'cursor': 'pointer'
+                },
+                        selected_style={
+                            'borderTop': 'none',
+                            'borderRight': 'none',
+                            'borderLeft': 'none',
+                            'borderBottom': '3px solid #4CAF50',
+                            'backgroundColor': '#ffffff',
+                            'color': '#4CAF50',
+                            'padding': '12px 24px',
+                            'marginRight': '4px',
+                            'borderRadius': '8px 8px 0 0',
+                            'fontWeight': 'bold',
+                            'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
+                        }, children=[
+                        create_tab_content('analysis')
+                    ])
+            ], style={
+                'margin': '20px 0',
                 'borderTop': 'none',
                 'borderRight': 'none',
-                'borderBottom': 'none',
                 'borderLeft': 'none',
-                'padding': '12px 24px',
-                'marginRight': '4px',
-                'backgroundColor': '#f5f5f5',
-                'color': '#666',
-                'borderRadius': '8px 8px 0 0',
-                'fontWeight': '500',
-                'transition': 'all 0.3s ease',
-                'cursor': 'pointer'
+                'borderBottom': '2px solid #e0e0e0'
             },
-                    selected_style={
-                        'borderTop': 'none',
-                        'borderRight': 'none',
-                        'borderLeft': 'none',
-                        'borderBottom': '3px solid #4CAF50',
-                        'backgroundColor': '#ffffff',
-                        'color': '#4CAF50',
-                        'padding': '12px 24px',
-                        'marginRight': '4px',
-                        'borderRadius': '8px 8px 0 0',
-                        'fontWeight': 'bold',
-                        'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
-                    }, children=[
-                    create_tab_content('samples')
-                ]),
-            dcc.Tab(label='Experiments', value="experiments", style={
-                'borderTop': 'none',
-                'borderRight': 'none',
-                'borderBottom': 'none',
-                'borderLeft': 'none',
-                'padding': '12px 24px',
-                'marginRight': '4px',
-                'backgroundColor': '#f5f5f5',
-                'color': '#666',
-                'borderRadius': '8px 8px 0 0',
-                'fontWeight': '500',
-                'transition': 'all 0.3s ease',
-                'cursor': 'pointer'
-            },
-                    selected_style={
-                        'borderTop': 'none',
-                        'borderRight': 'none',
-                        'borderLeft': 'none',
-                        'borderBottom': '3px solid #4CAF50',
-                        'backgroundColor': '#ffffff',
-                        'color': '#4CAF50',
-                        'padding': '12px 24px',
-                        'marginRight': '4px',
-                        'borderRadius': '8px 8px 0 0',
-                        'fontWeight': 'bold',
-                        'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
-                    }, children=[
-                    create_tab_content('experiments')
-                ]),
-            dcc.Tab(label='Analysis', value="analysis", style={
-                'borderTop': 'none',
-                'borderRight': 'none',
-                'borderBottom': 'none',
-                'borderLeft': 'none',
-                'padding': '12px 24px',
-                'marginRight': '4px',
-                'backgroundColor': '#f5f5f5',
-                'color': '#666',
-                'borderRadius': '8px 8px 0 0',
-                'fontWeight': '500',
-                'transition': 'all 0.3s ease',
-                'cursor': 'pointer'
-            },
-                    selected_style={
-                        'borderTop': 'none',
-                        'borderRight': 'none',
-                        'borderLeft': 'none',
-                        'borderBottom': '3px solid #4CAF50',
-                        'backgroundColor': '#ffffff',
-                        'color': '#4CAF50',
-                        'padding': '12px 24px',
-                        'marginRight': '4px',
-                        'borderRadius': '8px 8px 0 0',
-                        'fontWeight': 'bold',
-                        'boxShadow': '0 -2px 4px rgba(0,0,0,0.1)'
-                    }, children=[
-                    create_tab_content('analysis')
-                ])
-        ], style={
-            'margin': '20px 0',
-            'borderTop': 'none',
-            'borderRight': 'none',
-            'borderLeft': 'none',
-            'borderBottom': '2px solid #e0e0e0'
-        },
             colors={"border": "transparent", "primary": "#4CAF50", "background": "#f5f5f5"})
     ], className='container')
 ])
@@ -712,7 +711,7 @@ def store_file_data(contents, filename):
         # Handle case where contents might not have comma (shouldn't happen but safety check)
         if ',' not in contents:
             raise ValueError("Invalid file format: missing content separator")
-        
+
         content_type, content_string = contents.split(',', 1)  # Split only on first comma
 
         # Validate file type
@@ -725,7 +724,7 @@ def store_file_data(contents, filename):
             decoded = base64.b64decode(content_string)
         except Exception as e:
             raise ValueError(f"Error decoding file: {str(e)}")
-        
+
         try:
             excel_file = pd.ExcelFile(io.BytesIO(decoded), engine="openpyxl")
         except Exception as e:
@@ -842,7 +841,7 @@ def show_and_enable_buttons(file_data):
     [Input('validate-button-samples', 'n_clicks')],
     [State('stored-file-data', 'data'),
      State('stored-filename', 'data'),
-     State('biosamples-action-samples', 'value'),
+     State('biosamples-action-samples', 'data'),
      State('output-data-upload-samples', 'children'),
      State('stored-all-sheets-data', 'data'),
      State('stored-sheet-names', 'data'),
@@ -919,26 +918,36 @@ def validate_data(n_clicks, contents, filename, action, current_children, all_sh
         else:
             return html.Div(validation_components + [current_children]), json_validation_results
 
+    # Derive a simple validation status summary for the header
+    if invalid_count and invalid_count > 0:
+        status_text = f"Errors ({invalid_count} invalid record" + ("s)" if invalid_count != 1 else ")")
+        status_color = "#c62828"
+    else:
+        status_text = "Success"
+        status_color = "green"
+
     validation_components = [
         dcc.Store(id='stored-error-data', data=error_data),
-        dcc.Store(id='stored-validation-results', data={'valid_count': valid_count, 'invalid_count': invalid_count,
-                                                        'all_sheets_data': all_sheets_validation_data}),
+        dcc.Store(
+            id='stored-validation-results',
+            data={
+                'valid_count': valid_count,
+                'invalid_count': invalid_count,
+                'all_sheets_data': all_sheets_validation_data,
+            },
+        ),
         html.H3("2. Conversion and Validation results"),
-
-        html.Div([
-            html.P("Conversion Status", style={'fontWeight': 'bold'})
-            ,
-            html.P("Success", style={'color': 'green', 'fontWeight': 'bold'})
-            ,
-            html.P("Validation Status", style={'fontWeight': 'bold'})
-            ,
-            html.P("Finished", style={'color': 'green', 'fontWeight': 'bold'}),
-        ], style={'margin': '10px 0'})
-        ,
-
-        html.Div(id='error-table-container', style={'display': 'none'})
-        ,
-        html.Div(id='validation-results-container', style={'margin': '20px 0'})
+        html.Div(
+            [
+                html.P("Conversion Status", style={'fontWeight': 'bold'}),
+                html.P("Success", style={'color': 'green', 'fontWeight': 'bold'}),
+                html.P("Validation Status", style={'fontWeight': 'bold'}),
+                html.P(status_text, style={'color': status_color, 'fontWeight': 'bold'}),
+            ],
+            style={'margin': '10px 0'},
+        ),
+        html.Div(id='error-table-container', style={'display': 'none'}),
+        html.Div(id='validation-results-container', style={'margin': '20px 0'}),
     ]
 
     if current_children is None:
@@ -1244,7 +1253,7 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                                     if str(c).lower() == str(col).lower():
                                         col_idx = i
                                         break
-                            
+
                             if col_idx is not None:
                                 # Store both messages and field name for tooltip
                                 row_to_field_errors[row_idx]["errors"][col_idx] = {
@@ -1266,7 +1275,7 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                                     if str(c).lower() == str(col).lower():
                                         col_idx = i
                                         break
-                            
+
                             if col_idx is not None:
                                 # Store both messages and field name for tooltip
                                 row_to_field_errors[row_idx]["warnings"][col_idx] = {
@@ -1279,11 +1288,11 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                 if '.' in header:
                     return header.split('.')[0]
                 return header
-            
+
             # Create a copy of the DataFrame with cleaned headers
             df_cleaned = df.copy()
             df_cleaned.columns = [clean_header_name(col) for col in df.columns]
-            
+
             # Write to Excel with cleaned headers
             sheet_name_clean = sheet_name[:31]  # Excel sheet name limit
             df_cleaned.to_excel(writer, sheet_name=sheet_name_clean, index=False)
@@ -1317,7 +1326,7 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
 
                 if row_idx in row_to_field_errors:
                     field_data = row_to_field_errors[row_idx]
-                    
+
                     # Get all columns that have errors or warnings
                     all_affected_cols = set()
                     all_affected_cols.update(field_data.get("errors", {}).keys())
@@ -1326,7 +1335,7 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                     for col_idx in all_affected_cols:
                         if col_idx >= len(cols) or col_idx < 0:
                             continue
-                        
+
                         # Get cell value from the cleaned DataFrame
                         try:
                             if row_idx < len(df_cleaned) and col_idx < len(df_cleaned.columns):
@@ -1338,17 +1347,17 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                                 cell_value = ""
                         except Exception:
                             cell_value = ""
-                        
+
                         # Check if this cell has errors (errors take precedence)
                         has_errors = col_idx in field_data.get("errors", {})
                         has_warnings = col_idx in field_data.get("warnings", {})
-                        
+
                         if not (has_errors or has_warnings):
                             continue
-                        
+
                         # Combine tooltip messages from both errors and warnings
                         tooltip_parts = []
-                        
+
                         if has_errors:
                             error_data = field_data["errors"][col_idx]
                             field_name = error_data.get("field",
@@ -1362,24 +1371,26 @@ def download_annotated_xlsx(n_clicks, validation_results, all_sheets_data, sheet
                         elif has_warnings:
                             warning_data = field_data["warnings"][col_idx]
                             field_name = warning_data.get("field",
-                                                          cols_original[col_idx] if col_idx < len(cols_original) else "")
+                                                          cols_original[col_idx] if col_idx < len(
+                                                              cols_original) else "")
                             msgs = warning_data.get("messages", [])
                             msgs_list = msgs if isinstance(msgs, list) else [msgs]
                             for msg in msgs_list:
                                 tooltip_parts.append(f"Warning - {field_name}: {msg}")
                             # Highlight in yellow (only warnings, no errors) - overwrite cell with formatting
                             ws.write(excel_row, col_idx, cell_value, fmt_yellow)
-                        
+
                         # Add warnings to tooltip even if cell is highlighted red (errors take precedence)
                         if has_errors and has_warnings:
                             warning_data = field_data["warnings"][col_idx]
                             field_name = warning_data.get("field",
-                                                          cols_original[col_idx] if col_idx < len(cols_original) else "")
+                                                          cols_original[col_idx] if col_idx < len(
+                                                              cols_original) else "")
                             msgs = warning_data.get("messages", [])
                             msgs_list = msgs if isinstance(msgs, list) else [msgs]
                             for msg in msgs_list:
                                 tooltip_parts.append(f"Warning - {field_name}: {msg}")
-                        
+
                         # Add combined tooltip
                         if tooltip_parts:
                             tooltip_text = "\n".join([f"• {part}" for part in tooltip_parts])
@@ -1415,7 +1426,7 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
 
     # Get sample_types_processed to filter sheets
     sample_types_processed = validation_data.get('sample_types_processed', []) or []
-    
+
     # Get sample_results for summary data (structure: sample_results[sheet_name] = {valid_{type}s: [], invalid_{type}s: [], summary: {}})
 
     sample_results = validation_data.get('sample_results', {}) or {}
@@ -1427,10 +1438,10 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
         # Only show sheets that are in sample_types_processed
         if sheet_name not in sample_types_processed:
             continue
-        
+
         # Get summary from sample_results for this sample type (sheet_name)
         st_data = sample_results.get(sheet_name, {}) or {}
-        
+
         # Use summary field for counts (more reliable than counting records)
         summary = st_data.get('summary', {}) or {}
         valid_count = summary.get('valid', 0)
@@ -1438,7 +1449,7 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
 
         # Make sheet name title case (first letter of each word capital)
         sheet_name_title = sheet_name.title()
-        
+
         # Create label using sample_results summary with inline green color for valid count
         label = f"{sheet_name_title} (<span style='color: #4CAF50; font-weight: bold;'>{valid_count} valid </span>/ {invalid_count} invalid)"
 
@@ -1488,21 +1499,21 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
 
     tabs = html.Div([
         dcc.Tabs(
-        id='sheet-validation-tabs',
-        value=sheets_with_data[0] if sheets_with_data else None,
-        children=sheet_tabs,
-        style={
-            'borderTop': 'none',
-            'borderRight': 'none',
-            'borderBottom': '2px solid #e0e0e0',
-            'borderLeft': 'none',
-            'marginBottom': '20px'
-        },
-        colors={
-            "border": "transparent",
-            "primary": "#4CAF50",
-            "background": "#f5f5f5"
-        }
+            id='sheet-validation-tabs',
+            value=sheets_with_data[0] if sheets_with_data else None,
+            children=sheet_tabs,
+            style={
+                'borderTop': 'none',
+                'borderRight': 'none',
+                'borderBottom': '2px solid #e0e0e0',
+                'borderLeft': 'none',
+                'marginBottom': '20px'
+            },
+            colors={
+                "border": "transparent",
+                "primary": "#4CAF50",
+                "background": "#f5f5f5"
+            }
         ),
         html.Div(id='sheet-validation-content-wrapper', style={'marginTop': '20px'})
     ])
@@ -1521,12 +1532,12 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
 
                    // Dash tabs are typically rendered with role="tablist" and children with role="tab"
                    let tabLabels = tabContainer.querySelectorAll('[role="tab"]');
-                   
+
                    if (tabLabels.length === 0) {
                        // Try alternative selectors
                        tabLabels = tabContainer.querySelectorAll('.tab, [class*="tab"], [class*="Tab"]');
                    }
-                   
+
                    if (tabLabels.length === 0) {
                        tabLabels = tabContainer.querySelectorAll('div[role="tab"], button[role="tab"]');
                    }
@@ -1562,7 +1573,7 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
                            if (match) {
                                const validCount = match[1];
                                const invalidCount = match[2];
-                               
+
                                // Replace with colored spans - color both number and word
                                const styled = originalText.replace(
                                    /\\((\\d+)\\s+valid\\s+\\/\\s+(\\d+)\\s+invalid\\)/,
@@ -1622,7 +1633,7 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
                    const observer = new MutationObserver(function(mutations) {
                        setTimeout(attemptStyle, 50);
                    });
-                   
+
                    observer.observe(container, { 
                        childList: true, 
                        subtree: true,
@@ -1668,8 +1679,8 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
     )
 
     return html.Div([
-        header_bar, 
-        tabs, 
+        header_bar,
+        tabs,
         style_script
     ], style={
         "marginTop": "8px",
@@ -1690,7 +1701,8 @@ def populate_sheet_validation_content(selected_sheet_name, validation_results, a
         return html.Div(style={'opacity': 0, 'transition': 'opacity 0.3s ease-in-out'})
 
     if not all_sheets_data or selected_sheet_name not in all_sheets_data:
-        return html.Div("No data available for this sheet.", style={'opacity': 1, 'transition': 'opacity 0.3s ease-in-out'})
+        return html.Div("No data available for this sheet.",
+                        style={'opacity': 1, 'transition': 'opacity 0.3s ease-in-out'})
 
     # Wrap content with smooth transition
     content = make_sheet_validation_panel(selected_sheet_name, validation_results, all_sheets_data)
@@ -1963,18 +1975,18 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
     # Count errors and warnings by field
     error_fields_count = {}
     missing_required_fields = {}  # Track missing required fields that don't exist in the sheet
-    
+
     for sample_name, field_errors in error_map.items():
         for field, msgs in field_errors.items():
             error_fields_count[field] = error_fields_count.get(field, 0) + 1
-            
+
             # Check if this is a missing required field error (field not in sheet columns)
             field_in_sheet = False
             for col in df_all.columns:
                 if str(col).lower() == str(field).lower() or str(field).lower() in str(col).lower():
                     field_in_sheet = True
                     break
-            
+
             # If field is not in sheet and has "Field required" or similar messages
             if not field_in_sheet:
                 msgs_list = msgs if isinstance(msgs, list) else [msgs]
@@ -1993,7 +2005,7 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
 
     # Build report sections
     report_sections = []
-    
+
     # Panel for missing required fields
     if missing_required_fields:
         missing_fields_items = []
@@ -2003,9 +2015,10 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
                 html.Div([
                     html.Span(f"{field}: ", style={'fontWeight': 'bold', 'color': '#f44336'}),
                     html.Span(" | ".join(msgs_list), style={'color': '#666'})
-                ], style={'marginBottom': '8px', 'padding': '8px', 'backgroundColor': '#ffebee', 'borderRadius': '4px', 'borderLeft': '4px solid #f44336'})
+                ], style={'marginBottom': '8px', 'padding': '8px', 'backgroundColor': '#ffebee', 'borderRadius': '4px',
+                          'borderLeft': '4px solid #f44336'})
             )
-        
+
         report_sections.append(
             html.Div([
                 html.H5("Missing Required Fields", style={
@@ -2414,7 +2427,7 @@ def _disable_submit(u, p, v):
         "border": "none", "borderRadius": "8px", "cursor": "not-allowed",
         "fontSize": "16px", "width": "140px", "opacity": "0.6"
     }
-    
+
     if not v or "results" not in v:
         return True, disabled_style
 
@@ -2447,7 +2460,7 @@ def _disable_submit(u, p, v):
     State("biosamples-username-samples", "value"),
     State("biosamples-password-samples", "value"),
     State("biosamples-env-samples", "value"),
-    State("biosamples-action-samples", "value"),
+    State("biosamples-action-samples", "data"),
     State("stored-json-validation-results", "data"),
     prevent_initial_call=True,
 )
@@ -2522,12 +2535,12 @@ def _submit_to_biosamples(n, username, password, env, action, v):
         # If no BioSample IDs were returned, surface a clear red error immediately
         if not biosamples_ids:
             msg_children = [
-                html.Span(
-                    "Error: submission failed",
-                    style={"fontWeight": 600, "color": "#c62828"},
-                ),
-                html.Br(),
-            ] + msg_children
+                               html.Span(
+                                   "Error: submission failed",
+                                   style={"fontWeight": 600, "color": "#c62828"},
+                               ),
+                               html.Br(),
+                           ] + msg_children
 
         msg = html.Div(msg_children, style={"color": color})
 
@@ -2645,6 +2658,142 @@ app.clientside_callback(
 
 
 @app.callback(
+    [
+        Output("biosamples-action-samples", "data"),
+        Output(
+            "biosamples-action-samples-option-submission",
+            "className",
+        ),
+        Output(
+            "biosamples-action-samples-option-update",
+            "className",
+        ),
+    ],
+    [
+        Input("biosamples-action-samples-option-submission", "n_clicks"),
+        Input("biosamples-action-samples-option-update", "n_clicks"),
+    ],
+)
+def _sync_custom_samples_radio(n_sub, n_upd):
+    """
+    Keep custom Samples radio UI in sync with selected mode.
+    """
+    base_class = "custom-radio-option"
+    tooltip_class = " tooltip-target"
+
+    # Default selection when nothing clicked
+    if not n_sub and not n_upd:
+        return (
+            "submission",
+            base_class + tooltip_class + " selected",
+            base_class + tooltip_class,
+        )
+
+    # Choose whichever option was clicked last
+    ctx = dash.callback_context
+    triggered = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else ""
+    if triggered == "biosamples-action-samples-option-update":
+        return (
+            "update",
+            base_class + tooltip_class,
+            base_class + tooltip_class + " selected",
+        )
+
+    return (
+        "submission",
+        base_class + tooltip_class + " selected",
+        base_class + tooltip_class,
+    )
+#
+#
+@app.callback(
+    [
+        Output("biosamples-action-experiments", "data"),
+        Output(
+            "biosamples-action-experiments-option-submission",
+            "className",
+        ),
+        Output(
+            "biosamples-action-experiments-option-update",
+            "className",
+        ),
+    ],
+    [
+        Input("biosamples-action-experiments-option-submission", "n_clicks"),
+        Input("biosamples-action-experiments-option-update", "n_clicks"),
+    ],
+)
+def _sync_custom_experiments_radio(n_sub, n_upd):
+    base_class = "custom-radio-option"
+    tooltip_class = " tooltip-target"
+
+    if not n_sub and not n_upd:
+        return (
+            "submission",
+            base_class + tooltip_class + " selected",
+            base_class + tooltip_class,
+        )
+
+    ctx = dash.callback_context
+    triggered = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else ""
+    if triggered == "biosamples-action-experiments-option-update":
+        return (
+            "update",
+            base_class + tooltip_class,
+            base_class + tooltip_class + " selected",
+        )
+
+    return (
+        "submission",
+        base_class + tooltip_class + " selected",
+        base_class + tooltip_class,
+    )
+#
+
+@app.callback(
+    [
+        Output("biosamples-action-analysis", "data"),
+        Output(
+            "biosamples-action-analysis-option-submission",
+            "className",
+        ),
+        Output(
+            "biosamples-action-analysis-option-update",
+            "className",
+        ),
+    ],
+    [
+        Input("biosamples-action-analysis-option-submission", "n_clicks"),
+        Input("biosamples-action-analysis-option-update", "n_clicks"),
+    ],
+)
+def _sync_custom_analysis_radio(n_sub, n_upd):
+    base_class = "custom-radio-option"
+    tooltip_class = " tooltip-target"
+
+    if not n_sub and not n_upd:
+        return (
+            "submission",
+            base_class + tooltip_class + " selected",
+            base_class + tooltip_class,
+        )
+
+    ctx = dash.callback_context
+    triggered = ctx.triggered[0]["prop_id"].split(".")[0] if ctx.triggered else ""
+    if triggered == "biosamples-action-analysis-option-update":
+        return (
+            "update",
+            base_class + tooltip_class,
+            base_class + tooltip_class + " selected",
+        )
+
+    return (
+        "submission",
+        base_class + tooltip_class + " selected",
+        base_class + tooltip_class,
+    )
+
+@app.callback(
     Output("samples-submission-results-xml-download", "data"),
     Input("samples-download-submission-xml-btn", "n_clicks"),
     State("samples-submission-results-store", "data"),
@@ -2663,6 +2812,7 @@ def _download_samples_submission_tsv(n_clicks, store_data):
         lines.append(f"{name_safe}\t{acc_safe}")
     tsv_content = "\n".join(lines)
     return dcc.send_string(tsv_content, "submission_results.txt")
+
 
 # Clientside callback to style tab labels when validation results are updated
 app.clientside_callback(
@@ -2721,7 +2871,7 @@ app.clientside_callback(
                     if (match) {
                         const validCount = match[1];
                         const invalidCount = match[2];
-                        
+
                         const styled = originalText.replace(
                             /\\((\\d+)\\s+valid\\s+\\/\\s+(\\d+)\\s+invalid\\)/,
                             '(<span style="color: #4CAF50 !important; font-weight: bold !important;">' + validCount + ' valid</span> / <span style="color: #f44336 !important; font-weight: bold !important;">' + invalidCount + ' invalid</span>)'
@@ -2796,10 +2946,12 @@ def reset_app_state(n_clicks):
 
 # Register experiments tab callbacks
 from experiments_tab import register_experiments_callbacks
+
 register_experiments_callbacks(app)
 
 # Register analysis tab callbacks
 from analysis_tab import register_analysis_callbacks
+
 register_analysis_callbacks(app)
 
 # ============================================================================
