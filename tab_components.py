@@ -14,12 +14,150 @@ experiment_metadata_template_without_examples = '../../assets/empty/faang_experi
 analysis_metadata_template_without_examples = '../../assets/empty/faang_analysis.xlsx'
 trackhubs_template_without_examples = '../../assets/empty/trackhubs.xlsx'
 
-tooltipUpdate = ('• This action will update the sample details with the provided metadata. \n '
-                 '• Please ensure that each entry in the submitted spreadsheet contains the correct Biosample ID. \n'
-                 '• The relationship columns (e.g \'Derived From\' column) should also contain the Biosample ID of the related sample. \n' +
-                 '• Note that in the UPDATE spreadsheet, the column \'Sample Name\' has been replaced with \'Biosample ID\'. See provided example for updates.')
+
+def _link_button_style(bg: str, fg: str = "white") -> dict:
+    """Shared style for small header buttons/links."""
+    return {
+        "backgroundColor": bg,
+        "color": fg,
+        "padding": "8px 12px",
+        "border": "none",
+        "borderRadius": "4px",
+        "cursor": "pointer",
+        "fontSize": "13px",
+        "textDecoration": "none",
+        "display": "inline-block",
+    }
 
 
+def _header_buttons_samples():
+    return html.Div(
+        [
+            html.A(
+                "Download example template",
+                id="samples-download-example-template-btn",
+                href=sample_metadata_template_with_examples.replace('../../assets', '/assets'),
+                target="_blank",
+                style=_link_button_style("#673ab7"),
+            ),
+            html.A(
+                "Download empty template",
+                id="samples-download-empty-template-btn",
+                href=sample_metadata_template_without_examples.replace('../../assets', '/assets'),
+                target="_blank",
+                style=_link_button_style("#673ab7"),
+            ),
+            html.A(
+                "Download example template for UPDATE",
+                id="samples-download-update-template-btn",
+                href=sample_biosample_update_template.replace('../../assets', '/assets'),
+                target="_blank",
+                style=_link_button_style("#673ab7"),
+            ),
+            html.A(
+                "Upload protocol",
+                id="samples-upload-protocol-btn",
+                href="https://data.faang.org/upload_protocol?from=samples",
+                target="_blank",
+                style=_link_button_style("green"),
+            ),
+            html.A(
+                "Submission guideline",
+                id="samples-submission-guideline-btn",
+                href="https://dcc-documentation.readthedocs.io/en/latest/sample/biosamples_template/",
+                target="_blank",
+                style=_link_button_style("#ffd740", "black"),
+            ),
+        ],
+        style={
+            "display": "flex",
+            "flexWrap": "wrap",
+            "gap": "8px",
+            "marginTop": "8px",
+        },
+    )
+
+
+def _header_buttons_experiments():
+    return html.Div(
+        [
+            html.A(
+                "Download example template",
+                id="experiments-download-example-template-btn",
+                href=experiment_metadata_template_with_examples.replace("../../assets", "/assets"),
+                target="_blank",
+                style=_link_button_style("#673ab7"),
+            ),
+            html.A(
+                "Download empty template",
+                id="experiments-download-empty-template-btn",
+                href=experiment_metadata_template_without_examples.replace("../../assets", "/assets"),
+                target="_blank",
+                style=_link_button_style("#673ab7"),
+            ),
+            html.A(
+                "Upload protocol",
+                id="experiments-upload-protocol-btn",
+                href="https://data.faang.org/upload_protocol?from=experiments",
+                target="_blank",
+                style=_link_button_style("green"),
+            ),
+            html.A(
+                "Submission guideline",
+                id="experiments-submission-guideline-btn",
+                href="https://dcc-documentation.readthedocs.io/en/latest/experiment/ena_template/",
+                target="_blank",
+                style=_link_button_style("#ffd740", "black"),
+            ),
+        ],
+        style={
+            "display": "flex",
+            "flexWrap": "wrap",
+            "gap": "8px",
+            "marginTop": "8px",
+        },
+    )
+
+
+def _header_buttons_analysis():
+    return html.Div(
+        [
+            html.A(
+                "Download example template",
+                id="analysis-download-example-template-btn",
+                href=analysis_metadata_template_with_examples.replace("../../assets", "/assets"),
+                target="_blank",
+                style=_link_button_style("#673ab7"),
+            ),
+            html.A(
+                "Download empty template",
+                id="analysis-download-empty-template-btn",
+                href=analysis_metadata_template_without_examples.replace("../../assets", "/assets"),
+                target="_blank",
+                style=_link_button_style("#673ab7"),
+            ),
+            html.A(
+                "Upload protocol",
+                id="analysis-upload-protocol-btn",
+                href="https://data.faang.org/upload_protocol?from=analyses",
+                target="_blank",
+                style=_link_button_style("green"),
+            ),
+            html.A(
+                "Submission guideline",
+                id="analysis-submission-guideline-btn",
+                href="https://dcc-documentation.readthedocs.io/en/latest/analysis/analysis_index/",
+                target="_blank",
+                style=_link_button_style("#ffd740", "black"),
+            ),
+        ],
+        style={
+            "display": "flex",
+            "flexWrap": "wrap",
+            "gap": "8px",
+            "marginTop": "8px",
+        },
+    )
 
 
 def create_file_upload_area(tab_type: str):
@@ -32,262 +170,13 @@ def create_file_upload_area(tab_type: str):
     Returns:
         HTML Div containing file upload component
     """
-    # Extra helper buttons are only shown on the Samples / Experiments / Analysis tabs
     extra_buttons = None
     if tab_type == "samples":
-        extra_buttons = html.Div(
-            [
-                html.A(
-                    "Download example template",
-                    id="samples-download-example-template-btn",
-                    href=sample_metadata_template_with_examples.replace('../../assets', '/assets'),
-                    target="_blank",
-                    style={
-                        "backgroundColor": "#673ab7",
-                        "color": "white",
-                        "padding": "8px 12px",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "fontSize": "13px",
-                        "textDecoration": "none",
-                        "display": "inline-block",
-                    },
-                ),
-                html.A(
-                    "Download empty template",
-                    id="samples-download-empty-template-btn",
-                    href=sample_metadata_template_without_examples.replace('../../assets', '/assets'),
-                    target="_blank",
-                    style={
-                        "backgroundColor": "#673ab7",
-                        "color": "white",
-                        "padding": "8px 12px",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "fontSize": "13px",
-                        "textDecoration": "none",
-                        "display": "inline-block",
-                    },
-                ),
-                html.A(
-                    "Download example template for UPDATE",
-                    id="samples-download-update-template-btn",
-                    href=sample_biosample_update_template.replace('../../assets', '/assets'),
-                    target="_blank",
-                    style={
-                        "backgroundColor": "#673ab7",
-                        "color": "white",
-                        "padding": "8px 12px",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "fontSize": "13px",
-                        "textDecoration": "none",
-                        "display": "inline-block",
-                    },
-                ),
-                html.A(
-                    "Upload protocol",
-                    id="samples-upload-protocol-btn",
-                    href="https://data.faang.org/upload_protocol?from=samples",
-                    target="_blank",
-                    style={
-                        "backgroundColor": "green",
-                        "color": "white",
-                        "padding": "8px 12px",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "fontSize": "13px",
-                        "textDecoration": "none",
-                        "display": "inline-block",
-                    },
-                ),
-                html.A(
-                    "Submission guideline",
-                    id="samples-submission-guideline-btn",
-                    href="https://dcc-documentation.readthedocs.io/en/latest/sample/biosamples_template/",
-                    target="_blank",
-                    style={
-                        "backgroundColor": "#ffd740",
-                        "color": "black",
-                        "padding": "8px 12px",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "fontSize": "13px",
-                        "textDecoration": "none",
-                        "display": "inline-block",
-                    },
-                ),
-            ],
-            style={
-                "display": "flex",
-                "flexWrap": "wrap",
-                "gap": "8px",
-                "marginTop": "8px",
-            },
-        )
+        extra_buttons = _header_buttons_samples()
     elif tab_type == "experiments":
-        extra_buttons = html.Div(
-            [
-                html.A(
-                    "Download example template",
-                    id="experiments-download-example-template-btn",
-                    href=experiment_metadata_template_with_examples.replace("../../assets", "/assets"),
-                    target="_blank",
-                    style={
-                        "backgroundColor": "#673ab7",
-                        "color": "white",
-                        "padding": "8px 12px",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "fontSize": "13px",
-                        "textDecoration": "none",
-                        "display": "inline-block",
-                    },
-                ),
-                html.A(
-                    "Download empty template",
-                    id="experiments-download-empty-template-btn",
-                    href=experiment_metadata_template_without_examples.replace("../../assets", "/assets"),
-                    target="_blank",
-                    style={
-                        "backgroundColor": "#673ab7",
-                        "color": "white",
-                        "padding": "8px 12px",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "fontSize": "13px",
-                        "textDecoration": "none",
-                        "display": "inline-block",
-                    },
-                ),
-                html.A(
-                    "Upload protocol",
-                    id="experiments-upload-protocol-btn",
-                    href="https://data.faang.org/upload_protocol?from=experiments",
-                    target="_blank",
-                    style={
-                        "backgroundColor": "green",
-                        "color": "white",
-                        "padding": "8px 12px",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "fontSize": "13px",
-                        "textDecoration": "none",
-                        "display": "inline-block",
-                    },
-                ),
-                html.A(
-                    "Submission guideline",
-                    id="experiments-submission-guideline-btn",
-                    href="https://dcc-documentation.readthedocs.io/en/latest/experiment/ena_template/",
-                    target="_blank",
-                    style={
-                        "backgroundColor": "#ffd740",
-                        "color": "black",
-                        "padding": "8px 12px",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "fontSize": "13px",
-                        "textDecoration": "none",
-                        "display": "inline-block",
-                    },
-                ),
-            ],
-            style={
-                "display": "flex",
-                "flexWrap": "wrap",
-                "gap": "8px",
-                "marginTop": "8px",
-            },
-        )
+        extra_buttons = _header_buttons_experiments()
     elif tab_type == "analysis":
-        extra_buttons = html.Div(
-            [
-                html.A(
-                    "Download example template",
-                    id="analysis-download-example-template-btn",
-                    href=analysis_metadata_template_with_examples.replace("../../assets", "/assets"),
-                    target="_blank",
-                    style={
-                        "backgroundColor": "#673ab7",
-                        "color": "white",
-                        "padding": "8px 12px",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "fontSize": "13px",
-                        "textDecoration": "none",
-                        "display": "inline-block",
-                    },
-                ),
-                html.A(
-                    "Download empty template",
-                    id="analysis-download-empty-template-btn",
-                    href=analysis_metadata_template_without_examples.replace("../../assets", "/assets"),
-                    target="_blank",
-                    style={
-                        "backgroundColor": "#673ab7",
-                        "color": "white",
-                        "padding": "8px 12px",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "fontSize": "13px",
-                        "textDecoration": "none",
-                        "display": "inline-block",
-                    },
-                ),
-                html.A(
-                    "Upload protocol",
-                    id="analysis-upload-protocol-btn",
-                    href="https://data.faang.org/upload_protocol?from=analyses",
-                    target="_blank",
-                    style={
-                        "backgroundColor": "green",
-                        "color": "white",
-                        "padding": "8px 12px",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "fontSize": "13px",
-                        "textDecoration": "none",
-                        "display": "inline-block",
-                    },
-                ),
-                html.A(
-                    "Submission guideline",
-                    id="analysis-submission-guideline-btn",
-                    href="https://dcc-documentation.readthedocs.io/en/latest/analysis/analysis_index/",
-                    target="_blank",
-                    style={
-                        "backgroundColor": "#ffd740",
-                        "color": "black",
-                        "padding": "8px 12px",
-                        "border": "none",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "fontSize": "13px",
-                        "textDecoration": "none",
-                        "display": "inline-block",
-                    },
-                ),
-            ],
-            style={
-                "display": "flex",
-                "flexWrap": "wrap",
-                "gap": "8px",
-                "marginTop": "8px",
-            },
-        )
+        extra_buttons = _header_buttons_analysis()
 
     return html.Div(
         [
