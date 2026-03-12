@@ -43,7 +43,7 @@ def create_file_upload_area(tab_type: str):
                     href=sample_metadata_template_with_examples.replace('../../assets', '/assets'),
                     target="_blank",
                     style={
-                        "backgroundColor": "#2563eb",
+                        "backgroundColor": "#673ab7",
                         "color": "white",
                         "padding": "8px 12px",
                         "border": "none",
@@ -60,7 +60,7 @@ def create_file_upload_area(tab_type: str):
                     href=sample_metadata_template_without_examples.replace('../../assets', '/assets'),
                     target="_blank",
                     style={
-                        "backgroundColor": "#2563eb",
+                        "backgroundColor": "#673ab7",
                         "color": "white",
                         "padding": "8px 12px",
                         "border": "none",
@@ -77,7 +77,7 @@ def create_file_upload_area(tab_type: str):
                     href=sample_biosample_update_template.replace('../../assets', '/assets'),
                     target="_blank",
                     style={
-                        "backgroundColor": "#2563eb",
+                        "backgroundColor": "#673ab7",
                         "color": "white",
                         "padding": "8px 12px",
                         "border": "none",
@@ -111,7 +111,7 @@ def create_file_upload_area(tab_type: str):
                     href="https://dcc-documentation.readthedocs.io/en/latest/sample/biosamples_template/",
                     target="_blank",
                     style={
-                        "backgroundColor": "yellow",
+                        "backgroundColor": "#ffd740",
                         "color": "black",
                         "padding": "8px 12px",
                         "border": "none",
@@ -139,7 +139,7 @@ def create_file_upload_area(tab_type: str):
                     href=experiment_metadata_template_with_examples.replace("../../assets", "/assets"),
                     target="_blank",
                     style={
-                        "backgroundColor": "#2563eb",
+                        "backgroundColor": "#673ab7",
                         "color": "white",
                         "padding": "8px 12px",
                         "border": "none",
@@ -156,7 +156,7 @@ def create_file_upload_area(tab_type: str):
                     href=experiment_metadata_template_without_examples.replace("../../assets", "/assets"),
                     target="_blank",
                     style={
-                        "backgroundColor": "#2563eb",
+                        "backgroundColor": "#673ab7",
                         "color": "white",
                         "padding": "8px 12px",
                         "border": "none",
@@ -190,7 +190,7 @@ def create_file_upload_area(tab_type: str):
                     href="https://dcc-documentation.readthedocs.io/en/latest/experiment/ena_template/",
                     target="_blank",
                     style={
-                        "backgroundColor": "yellow",
+                        "backgroundColor": "#ffd740",
                         "color": "black",
                         "padding": "8px 12px",
                         "border": "none",
@@ -218,7 +218,7 @@ def create_file_upload_area(tab_type: str):
                     href=analysis_metadata_template_with_examples.replace("../../assets", "/assets"),
                     target="_blank",
                     style={
-                        "backgroundColor": "#2563eb",
+                        "backgroundColor": "#673ab7",
                         "color": "white",
                         "padding": "8px 12px",
                         "border": "none",
@@ -235,7 +235,7 @@ def create_file_upload_area(tab_type: str):
                     href=analysis_metadata_template_without_examples.replace("../../assets", "/assets"),
                     target="_blank",
                     style={
-                        "backgroundColor": "#2563eb",
+                        "backgroundColor": "#673ab7",
                         "color": "white",
                         "padding": "8px 12px",
                         "border": "none",
@@ -269,7 +269,7 @@ def create_file_upload_area(tab_type: str):
                     href="https://dcc-documentation.readthedocs.io/en/latest/analysis/analysis_index/",
                     target="_blank",
                     style={
-                        "backgroundColor": "yellow",
+                        "backgroundColor": "#ffd740",
                         "color": "black",
                         "padding": "8px 12px",
                         "border": "none",
