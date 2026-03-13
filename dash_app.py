@@ -2531,6 +2531,7 @@ def _submit_to_biosamples(n, username, password, env, action, v):
 
         msg = html.Div(msg_children, style={"color": color})
 
+        table = None
         if biosamples_ids:
             biosamples_base_url = (
                 "https://wwwdev.ebi.ac.uk/biosamples/samples"
