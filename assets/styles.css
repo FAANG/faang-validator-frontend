@@ -123,6 +123,63 @@ h1 {
     opacity: 0.8;
 }
 
+/* Custom radio control for Samples tab */
+.custom-radio-group {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.custom-radio-option {
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+    position: relative;
+    color: #111827;
+    font-size: 14px;
+}
+
+.custom-radio-circle {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid #2563eb;
+    margin-right: 8px;
+    box-sizing: border-box;
+    position: relative;
+}
+
+.custom-radio-option.selected .custom-radio-circle {
+    background-color: #2563eb;
+}
+
+/* CSS tooltip on the whole option (including the circle) */
+.tooltip-target::after {
+    /* Use data-tooltip so we don't trigger native browser title tooltips */
+    content: attr(data-tooltip);
+    position: absolute;
+    left: 0;
+    top: 120%;
+    white-space: pre-line;
+    background-color: #111827;
+    color: #f9fafb;
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.3;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(4px);
+    transition: opacity 0.1s ease-out, transform 0.1s ease-out;
+    min-width: 220px;
+    z-index: 20;
+}
+
+.tooltip-target:hover::after {
+    opacity: 1;
+    transform: translateY(0);
+}
+
 .summary-button:hover {
     opacity: 0.9;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);

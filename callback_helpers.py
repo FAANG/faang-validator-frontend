@@ -165,19 +165,36 @@ def validate_data_logic(parsed_json: Dict, backend_url: str, filename: str):
         ])
         return None, None, error_div
 
+    # Derive validation status summary
+    if invalid_count and invalid_count > 0:
+        status_text = f"Errors ({invalid_count} invalid record" + ("s)" if invalid_count != 1 else ")")
+        status_color = "#c62828"
+    else:
+        status_text = "Success"
+        status_color = "green"
+
     validation_components = [
         dcc.Store(id='stored-error-data', data=error_data),
-        dcc.Store(id='stored-validation-results', data={'valid_count': valid_count, 'invalid_count': invalid_count,
-                                                        'all_sheets_data': all_sheets_validation_data}),
+        dcc.Store(
+            id='stored-validation-results',
+            data={
+                'valid_count': valid_count,
+                'invalid_count': invalid_count,
+                'all_sheets_data': all_sheets_validation_data,
+            },
+        ),
         html.H3("2. Conversion and Validation results"),
-        html.Div([
-            html.P("Conversion Status", style={'fontWeight': 'bold'}),
-            html.P("Success", style={'color': 'green', 'fontWeight': 'bold'}),
-            html.P("Validation Status", style={'fontWeight': 'bold'}),
-            html.P("Finished", style={'color': 'green', 'fontWeight': 'bold'}),
-        ], style={'margin': '10px 0'}),
+        html.Div(
+            [
+                html.P("Conversion Status", style={'fontWeight': 'bold'}),
+                html.P("Success", style={'color': 'green', 'fontWeight': 'bold'}),
+                html.P("Validation Status", style={'fontWeight': 'bold'}),
+                html.P(status_text, style={'color': status_color, 'fontWeight': 'bold'}),
+            ],
+            style={'margin': '10px 0'},
+        ),
         html.Div(id='error-table-container', style={'display': 'none'}),
-        html.Div(id='validation-results-container', style={'margin': '20px 0'})
+        html.Div(id='validation-results-container', style={'margin': '20px 0'}),
     ]
 
     return validation_components, json_validation_results, None
