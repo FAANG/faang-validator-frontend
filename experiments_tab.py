@@ -383,29 +383,6 @@ def register_experiments_callbacks(app):
 
         # Send data to backend for validation
         try:
-
-            import json
-            from datetime import datetime
-
-            # Create the JSON payload that will be sent to the backend
-            json_payload = {"data": parsed_json, "data_type": "experiment", "action": action}
-
-            # Generate a timestamp for the filename
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"experiment_validation_payload_{timestamp}.json"
-
-            # Save the JSON payload to a file for debugging
-            try:
-                with open(filename, 'w') as f:
-                    json.dump(json_payload, f, indent=2, ensure_ascii=False)
-                print(f"JSON payload saved to: {filename}")
-            except Exception as e:
-                print(f"Error saving JSON file: {e}")
-
-            # Koosum delete above
-
-
-
             response = requests.post(
                 f'{BACKEND_API_URL}/validate-data',
                 json={"data": parsed_json, "data_type": "experiment", "action": action},
