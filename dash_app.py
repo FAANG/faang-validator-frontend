@@ -16,7 +16,9 @@ from tab_components import create_tab_content
 
 # Backend API URL - can be configured via environment variable
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
-                                 'https://faang-validator-backend-service-964531885708.europe-west2.run.app')
+                                 'https://faang-validator-backend-service-341387543760.europe-west2.run.app')
+
+# https://faang-validator-backend-service-964531885708.europe-west2.run.app
 
 # Initialize the Dash app
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
