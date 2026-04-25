@@ -2155,41 +2155,20 @@ def _calculate_sheet_statistics_experiments(validation_results, all_sheets_data)
 
             errors, warnings = get_all_errors_and_warnings(record)
 
-            # Find which sheet contains this sample
-            # For experiments, try "Identifier" first, then "Sample Descriptor"
-            # OPTIMIZATION: Only iterate over sheets that were processed by backend
-            for sheet_name, sheet_records in (filtered_sheets_data or {}).items():
-                if not sheet_records:
-                    continue
-                sheet_sample_names = set()
-                for r in sheet_records:
-                    identifier = str(r.get("Sample Descriptor", "") or r.get("sample_descriptor", ""))
+            sheet_name = experiment_type  # experiment_type IS the sheet name
+            if sheet_name not in sheet_stats:
+                continue
 
-                    if identifier:
-                        sheet_sample_names.add(identifier)
-
-
-                if sample_descriptor in sheet_sample_names:
-                    if sheet_name not in sheet_stats:
-                        sheet_stats[sheet_name] = {
-                            'total_records': len(sheet_records),
-                            'valid_records': 0,
-                            'error_records': 0,
-                            'warning_records': 0,
-                            'sample_status': {}
-                        }
-
-                    if sample_descriptor not in sheet_stats[sheet_name]['sample_status']:
-                        if errors:
-                            sheet_stats[sheet_name]['error_records'] += 1
-                            sheet_stats[sheet_name]['sample_status'][sample_descriptor] = 'error'
-                        elif warnings:
-                            sheet_stats[sheet_name]['warning_records'] += 1
-                            sheet_stats[sheet_name]['sample_status'][sample_descriptor] = 'warning'
-                        else:
-                            sheet_stats[sheet_name]['valid_records'] += 1
-                            sheet_stats[sheet_name]['sample_status'][sample_descriptor] = 'valid'
-                    break
+            if sample_descriptor not in sheet_stats[sheet_name]['sample_status']:
+                if errors:
+                    sheet_stats[sheet_name]['error_records'] += 1
+                    sheet_stats[sheet_name]['sample_status'][sample_descriptor] = 'error'
+                elif warnings:
+                    sheet_stats[sheet_name]['warning_records'] += 1
+                    sheet_stats[sheet_name]['sample_status'][sample_descriptor] = 'warning'
+                else:
+                    sheet_stats[sheet_name]['valid_records'] += 1
+                    sheet_stats[sheet_name]['sample_status'][sample_descriptor] = 'valid'
 
     # Correct valid counts
     for sheet_name in sheet_stats:

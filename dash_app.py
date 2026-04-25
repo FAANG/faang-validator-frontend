@@ -527,8 +527,6 @@ app.layout = html.Div([
         dcc.Store(id='stored-json-validation-results-analysis', data=None),
         # Stores for submission XML download
         dcc.Store(id="samples-submission-results-store"),
-        dcc.Store(id="experiments-submission-results-store"),
-        dcc.Store(id="analysis-submission-results-store"),
         dcc.Download(id='download-table-csv'),
         dcc.Download(id='download-table-csv-analysis'),
         dcc.Download(id='download-table-csv-experiments'),
