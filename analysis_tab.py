@@ -1304,6 +1304,98 @@ def register_analysis_callbacks(app):
         return dcc.send_bytes(buffer.getvalue(), "annotated_template_analysis.xlsx")
 
 
+def _build_expandable_field_section(title, field_to_entries, noun, accent_color, bg_color, sheet_name=""):
+    """Build a collapsible section showing errors/warnings grouped by field."""
+    if not field_to_entries:
+        return None
+
+    items = sorted(field_to_entries.items(), key=lambda x: (-len(x[1]), x[0]))
+
+    details_elements = []
+    for field, entries in items:
+        count = len(entries)
+        summary = html.Summary(
+            [
+                html.Span(f"{field}: ", style={'fontWeight': 'bold'}),
+                html.Span(f"{count} {noun}(s)", style={'color': '#666'}),
+            ],
+            style={'cursor': 'pointer', 'padding': '4px 0', 'userSelect': 'none'},
+        )
+        message_items = [
+            html.Li(
+                [
+                    html.Span(
+                        f"Analysis {alias} — " if alias else "",
+                        style={'fontWeight': 600},
+                    ),
+                    html.Span(f"{field}: ", style={'fontWeight': 600}),
+                    html.Span(msg),
+                ],
+                style={'marginBottom': '4px'},
+            )
+            for alias, msg in entries
+        ]
+        details_elements.append(
+            html.Details(
+                [summary, html.Ul(message_items, style={'margin': '6px 0 6px 20px', 'padding': 0})],
+                style={'marginBottom': '6px'},
+            )
+        )
+
+    return html.Div([
+        html.H5(
+            f"{title} — {sheet_name}" if sheet_name else title,
+            style={
+                'marginTop': '20px',
+                'marginBottom': '15px',
+                'color': accent_color,
+                'borderBottom': f'2px solid {accent_color}',
+                'paddingBottom': '8px',
+            },
+        ),
+        html.Div(
+            details_elements,
+            style={'padding': '10px', 'backgroundColor': bg_color, 'borderRadius': '6px'},
+        ),
+    ])
+
+
+def _compute_per_sheet_issue_attribution_analysis(validation_data, all_sheets_data):
+    """Return (sheets_with_errors, sheets_with_warnings, sheets_with_relationship_errors).
+
+    Analysis_type IS the sheet name, so we attribute records directly without
+    descriptor matching.
+    """
+    results_by_type = validation_data.get('analysis_results', {}) or {}
+    analysis_types = validation_data.get('analysis_types_processed', []) or []
+
+    sheets_with_errors = set()
+    sheets_with_warnings = set()
+    sheets_with_relationship_errors = set()
+
+    valid_sheet_names = set((all_sheets_data or {}).keys())
+
+    for analysis_type in analysis_types:
+        if analysis_type not in valid_sheet_names:
+            continue
+
+        at_data = results_by_type.get(analysis_type, {}) or {}
+        for record in at_data.get("invalid", []) + at_data.get("valid", []):
+            errors_section = record.get('errors') or {}
+
+            if record.get('relationship_errors') or errors_section.get('relationship_errors'):
+                sheets_with_relationship_errors.add(analysis_type)
+
+            if errors_section.get('field_errors') or errors_section.get('errors'):
+                sheets_with_errors.add(analysis_type)
+
+            if record.get('field_warnings') or record.get('ontology_warnings'):
+                sheets_with_warnings.add(analysis_type)
+
+    return sheets_with_errors, sheets_with_warnings, sheets_with_relationship_errors
+
+
+
 def make_sheet_validation_panel_analysis(sheet_name: str, validation_results: dict, all_sheets_data: dict):
     """Create a panel showing validation results for analysis sheet"""
     import uuid
@@ -1622,77 +1714,88 @@ def make_sheet_validation_panel_analysis(sheet_name: str, validation_results: di
     warning_records = len([k for k in sheet_sample_names if k in warning_map and k not in error_map])
     valid_records = total_records - error_records
 
-    # Count errors and warnings by field
-    error_fields_count = {}
-    for sample_name, field_errors in error_map.items():
-        for field in field_errors.keys():
-            error_fields_count[field] = error_fields_count.get(field, 0) + 1
+    # Collect errors and warnings by field with alias + message details, deduped
+    errors_by_field = {}
+    seen_errors = set()
+    for alias, field_errors in error_map.items():
+        for field, messages in field_errors.items():
+            msgs_list = messages if isinstance(messages, list) else [messages]
+            for msg in msgs_list:
+                msg_str = str(msg)
+                key = (field, alias, msg_str)
+                if key in seen_errors:
+                    continue
+                seen_errors.add(key)
+                errors_by_field.setdefault(field, []).append((alias, msg_str))
 
-    warning_fields_count = {}
-    for sample_name, field_warnings in warning_map.items():
-        for field in field_warnings.keys():
-            warning_fields_count[field] = warning_fields_count.get(field, 0) + 1
+    warnings_by_field = {}
+    seen_warnings = set()
+    for alias, field_warnings in warning_map.items():
+        for field, messages in field_warnings.items():
+            msgs_list = messages if isinstance(messages, list) else [messages]
+            for msg in msgs_list:
+                msg_str = str(msg)
+                key = (field, alias, msg_str)
+                if key in seen_warnings:
+                    continue
+                seen_warnings.add(key)
+                warnings_by_field.setdefault(field, []).append((alias, msg_str))
 
     # Build report sections
     report_sections = []
 
-    # Errors by field
-    if error_fields_count:
-        error_items = sorted(error_fields_count.items(), key=lambda x: x[1], reverse=True)
-        report_sections.append(
-            html.Div([
-                html.H5("Errors by Field", style={
-                    'marginTop': '20px',
-                    'marginBottom': '15px',
-                    'color': '#f44336',
-                    'borderBottom': '2px solid #f44336',
-                    'paddingBottom': '8px'
-                }),
-                html.Ul([
-                    html.Li([
-                        html.Span(f"{field}: ", style={'fontWeight': 'bold'}),
-                        html.Span(f"{count} error(s)", style={'color': '#666'})
-                    ], style={'marginBottom': '6px'})
-                    for field, count in error_items
-                ], style={'padding': '10px', 'backgroundColor': '#ffebee', 'borderRadius': '6px',
-                          'listStylePosition': 'inside'})
-            ])
-        )
+    # Errors by field (expandable)
+    errors_section = _build_expandable_field_section(
+        "Errors by Field", errors_by_field, "error", '#f44336', '#ffebee', sheet_name
+    )
+    if errors_section:
+        report_sections.append(errors_section)
 
-    # Warnings by field
-    if warning_fields_count:
-        warning_items = sorted(warning_fields_count.items(), key=lambda x: x[1], reverse=True)
-        report_sections.append(
-            html.Div([
-                html.H5("Warnings by Field", style={
-                    'marginTop': '20px',
-                    'marginBottom': '15px',
-                    'color': '#ff9800',
-                    'borderBottom': '2px solid #ff9800',
-                    'paddingBottom': '8px'
-                }),
-                html.Ul([
-                    html.Li([
-                        html.Span(f"{field}: ", style={'fontWeight': 'bold'}),
-                        html.Span(f"{count} warning(s)", style={'color': '#666'})
-                    ], style={'marginBottom': '6px'})
-                    for field, count in warning_items
-                ], style={'padding': '10px', 'backgroundColor': '#fff3e0', 'borderRadius': '6px',
-                          'listStylePosition': 'inside'})
-            ])
-        )
+    # Warnings by field (expandable)
+    warnings_section = _build_expandable_field_section(
+        "Warnings by Field", warnings_by_field, "warning", '#ff9800', '#fff3e0', sheet_name
+    )
+    if warnings_section:
+        report_sections.append(warnings_section)
 
     # Total Summary
     if analysis_summary:
+        sheets_with_errors, sheets_with_warnings, sheets_with_relationship_errors = (
+            _compute_per_sheet_issue_attribution_analysis(validation_data, all_sheets_data)
+        )
         summary_items = []
         for key, value in analysis_summary.items():
             if isinstance(value, (int, float, str)):
                 display_key = key.replace('_', ' ').title()
+
+                attribution_sheets = None
+                try:
+                    int_value = int(value)
+                except (ValueError, TypeError):
+                    int_value = 0
+                if int_value > 0:
+                    key_lower = key.lower()
+                    if "invalid" in key_lower:
+                        attribution_sheets = sheets_with_errors
+                    elif "relationship_error" in key_lower:
+                        attribution_sheets = sheets_with_relationship_errors
+                    elif "warning" in key_lower:
+                        attribution_sheets = sheets_with_warnings
+
+                children = [
+                    html.Span(f"{display_key}: ", style={'fontWeight': 'bold'}),
+                    html.Span(str(value), style={'color': '#666'}),
+                ]
+                if attribution_sheets:
+                    children.append(
+                        html.Span(
+                            f"  (in: {', '.join(sorted(attribution_sheets))})",
+                            style={'color': '#1976D2', 'fontStyle': 'italic', 'marginLeft': '6px'},
+                        )
+                    )
+
                 summary_items.append(
-                    html.Div([
-                        html.Span(f"{display_key}: ", style={'fontWeight': 'bold'}),
-                        html.Span(str(value), style={'color': '#666'})
-                    ], style={'marginBottom': '8px'})
+                    html.Div(children, style={'marginBottom': '8px'})
                 )
         if summary_items:
             report_sections.append(
