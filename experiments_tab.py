@@ -248,9 +248,10 @@ def _build_expandable_field_section(title, field_to_entries, noun, accent_color,
             html.Li(
                 [
                     html.Span(
-                        f"Sample {sample_descriptor}: " if sample_descriptor else "",
+                        f"Sample {sample_descriptor} — " if sample_descriptor else "",
                         style={'fontWeight': 600},
                     ),
+                    html.Span(f"{field}: ", style={'fontWeight': 600}),
                     html.Span(msg),
                 ],
                 style={'marginBottom': '4px'},
