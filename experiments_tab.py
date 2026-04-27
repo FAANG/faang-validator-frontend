@@ -188,6 +188,45 @@ def get_all_errors_and_warnings(record):
 
     return errors, warnings
 
+
+def _compute_per_sheet_issue_attribution_experiments(validation_data, all_sheets_data):
+    """Return (sheets_with_errors, sheets_with_warnings, sheets_with_relationship_errors).
+
+    Attributes each record to its experiment_type directly — experiment_type
+    IS the sheet name, so no descriptor matching is needed (and matching by
+    descriptor would over-attribute to non-validated sheets like 'experiment_ena'
+    that happen to contain the same sample IDs).
+    """
+    results_by_type = validation_data.get('experiment_results', {}) or {}
+    experiment_types = validation_data.get('experiment_types_processed', []) or []
+
+    sheets_with_errors = set()
+    sheets_with_warnings = set()
+    sheets_with_relationship_errors = set()
+
+    valid_sheet_names = set((all_sheets_data or {}).keys())
+
+    for experiment_type in experiment_types:
+        # experiment_type IS the sheet name
+        if experiment_type not in valid_sheet_names:
+            continue
+
+        et_data = results_by_type.get(experiment_type, {}) or {}
+        for record in et_data.get("invalid", []) + et_data.get("valid", []):
+            errors_section = record.get('errors') or {}
+
+            if record.get('relationship_errors') or errors_section.get('relationship_errors'):
+                sheets_with_relationship_errors.add(experiment_type)
+
+            if errors_section.get('field_errors') or errors_section.get('errors'):
+                sheets_with_errors.add(experiment_type)
+
+            if record.get('field_warnings') or record.get('ontology_warnings'):
+                sheets_with_warnings.add(experiment_type)
+
+    return sheets_with_errors, sheets_with_warnings, sheets_with_relationship_errors
+
+
 def _build_expandable_field_section(title, field_to_entries, noun, accent_color, bg_color, sheet_name=""):
     if not field_to_entries:
         return None
@@ -434,23 +473,23 @@ def register_experiments_callbacks(app):
             return create_output([error_div]), None, None, None, None
 
         # Send data to backend for validation
+        # Send data to backend for validation
         try:
             response = requests.post(
                 f'{BACKEND_API_URL}/validate-data',
                 json={"data": parsed_json, "data_type": "experiment", "action": action},
                 headers={'accept': 'application/json', 'Content-Type': 'application/json'}
             )
-
             if response.status_code != 200:
-                raise Exception(f"JSON endpoint returned {response.status_code}")
-        except Exception as json_err:
-            # Fallback: if JSON endpoint doesn't exist, send as file
-            print(f"JSON endpoint failed: {json_err}")
-        if response.status_code == 200:
+                raise Exception(f"Backend returned {response.status_code}: {response.text}")
             response_json = response.json()
-
-        else:
-            raise Exception(f"Error {response.status_code}: {response.text}")
+        except Exception as e:
+            print(f"Validation request failed: {e}")
+            error_div = html.Div([
+                html.H5(filename),
+                html.P(f"Error connecting to backend API: {str(e)}", style={'color': 'red'})
+            ])
+            return create_output([error_div]), None, None, None, None
 
         # Process validation response
         # (The logic for handling different response formats remains the same)
@@ -2042,15 +2081,42 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
 
     # Total Summary
     if experiment_summary:
+        sheets_with_errors, sheets_with_warnings, sheets_with_relationship_errors = (
+            _compute_per_sheet_issue_attribution_experiments(validation_data, all_sheets_data)
+        )
         summary_items = []
         for key, value in experiment_summary.items():
             if isinstance(value, (int, float, str)):
                 display_key = key.replace('_', ' ').title()
+
+                attribution_sheets = None
+                try:
+                    int_value = int(value)
+                except (ValueError, TypeError):
+                    int_value = 0
+                if int_value > 0:
+                    key_lower = key.lower()
+                    if "invalid" in key_lower:
+                        attribution_sheets = sheets_with_errors
+                    elif "relationship_error" in key_lower:
+                        attribution_sheets = sheets_with_relationship_errors
+                    elif "warning" in key_lower:
+                        attribution_sheets = sheets_with_warnings
+
+                children = [
+                    html.Span(f"{display_key}: ", style={'fontWeight': 'bold'}),
+                    html.Span(str(value), style={'color': '#666'}),
+                ]
+                if attribution_sheets:
+                    children.append(
+                        html.Span(
+                            f"  (in: {', '.join(sorted(attribution_sheets))})",
+                            style={'color': '#1976D2', 'fontStyle': 'italic', 'marginLeft': '6px'},
+                        )
+                    )
+
                 summary_items.append(
-                    html.Div([
-                        html.Span(f"{display_key}: ", style={'fontWeight': 'bold'}),
-                        html.Span(str(value), style={'color': '#666'})
-                    ], style={'marginBottom': '8px'})
+                    html.Div(children, style={'marginBottom': '8px'})
                 )
         if summary_items:
             report_sections.append(
