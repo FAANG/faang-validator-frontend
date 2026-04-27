@@ -189,6 +189,99 @@ def get_all_errors_and_warnings(record):
     return errors, warnings
 
 
+def _compute_per_sheet_issue_attribution_experiments(validation_data, all_sheets_data):
+    """Return (sheets_with_errors, sheets_with_warnings, sheets_with_relationship_errors).
+
+    Attributes each record to its experiment_type directly — experiment_type
+    IS the sheet name, so no descriptor matching is needed (and matching by
+    descriptor would over-attribute to non-validated sheets like 'experiment_ena'
+    that happen to contain the same sample IDs).
+    """
+    results_by_type = validation_data.get('experiment_results', {}) or {}
+    experiment_types = validation_data.get('experiment_types_processed', []) or []
+
+    sheets_with_errors = set()
+    sheets_with_warnings = set()
+    sheets_with_relationship_errors = set()
+
+    valid_sheet_names = set((all_sheets_data or {}).keys())
+
+    for experiment_type in experiment_types:
+        # experiment_type IS the sheet name
+        if experiment_type not in valid_sheet_names:
+            continue
+
+        et_data = results_by_type.get(experiment_type, {}) or {}
+        for record in et_data.get("invalid", []) + et_data.get("valid", []):
+            errors_section = record.get('errors') or {}
+
+            if record.get('relationship_errors') or errors_section.get('relationship_errors'):
+                sheets_with_relationship_errors.add(experiment_type)
+
+            if errors_section.get('field_errors') or errors_section.get('errors'):
+                sheets_with_errors.add(experiment_type)
+
+            if record.get('field_warnings') or record.get('ontology_warnings'):
+                sheets_with_warnings.add(experiment_type)
+
+    return sheets_with_errors, sheets_with_warnings, sheets_with_relationship_errors
+
+
+def _build_expandable_field_section(title, field_to_entries, noun, accent_color, bg_color, sheet_name=""):
+    if not field_to_entries:
+        return None
+
+    # Sort by count desc, then field name
+    items = sorted(field_to_entries.items(), key=lambda x: (-len(x[1]), x[0]))
+
+    details_elements = []
+    for field, entries in items:
+        count = len(entries)
+        summary = html.Summary(
+            [
+                html.Span(f"{field}: ", style={'fontWeight': 'bold'}),
+                html.Span(f"{count} {noun}(s)", style={'color': '#666'}),
+            ],
+            style={'cursor': 'pointer', 'padding': '4px 0', 'userSelect': 'none'},
+        )
+        message_items = [
+            html.Li(
+                [
+                    html.Span(
+                        f"Sample {sample_descriptor} — " if sample_descriptor else "",
+                        style={'fontWeight': 600},
+                    ),
+                    html.Span(f"{field}: ", style={'fontWeight': 600}),
+                    html.Span(msg),
+                ],
+                style={'marginBottom': '4px'},
+            )
+            for sample_descriptor, msg in entries
+        ]
+        details_elements.append(
+            html.Details(
+                [summary, html.Ul(message_items, style={'margin': '6px 0 6px 20px', 'padding': 0})],
+                style={'marginBottom': '6px'},
+            )
+        )
+
+    return html.Div([
+        html.H5(
+            f"{title} — Sheet Name: {sheet_name}" if sheet_name else title,
+            style={
+                'marginTop': '20px',
+                'marginBottom': '15px',
+                'color': accent_color,
+                'borderBottom': f'2px solid {accent_color}',
+                'paddingBottom': '8px',
+            }),
+        html.Div(
+            details_elements,
+            style={'padding': '10px', 'backgroundColor': bg_color, 'borderRadius': '6px'},
+        ),
+    ])
+
+
 def _warnings_by_field(warnings_list):
     by_field = {}
     for w in warnings_list or []:
@@ -388,17 +481,16 @@ def register_experiments_callbacks(app):
                 json={"data": parsed_json, "data_type": "experiment", "action": action},
                 headers={'accept': 'application/json', 'Content-Type': 'application/json'}
             )
-
             if response.status_code != 200:
-                raise Exception(f"JSON endpoint returned {response.status_code}")
-        except Exception as json_err:
-            # Fallback: if JSON endpoint doesn't exist, send as file
-            print(f"JSON endpoint failed: {json_err}")
-        if response.status_code == 200:
+                raise Exception(f"Backend returned {response.status_code}: {response.text}")
             response_json = response.json()
-
-        else:
-            raise Exception(f"Error {response.status_code}: {response.text}")
+        except Exception as e:
+            print(f"Validation request failed: {e}")
+            error_div = html.Div([
+                html.H5(filename),
+                html.P(f"Error connecting to backend API: {str(e)}", style={'color': 'red'})
+            ])
+            return create_output([error_div]), None, None, None, None
 
         # Process validation response
         # (The logic for handling different response formats remains the same)
@@ -636,6 +728,13 @@ def register_experiments_callbacks(app):
         try:
             url = f"{BACKEND_API_URL}/submit-experiment"
             r = requests.post(url, json=body, timeout=600)
+
+            if not r.ok:
+                msg = html.Span(
+                    f"Submission failed [{r.status_code}]: {r.text}",
+                    style={"color": "#c62828", "fontWeight": 500},
+                )
+                return msg, dash.no_update, dash.no_update, hidden_style, None
 
             data = r.json() if r.content else {}
 
@@ -1947,77 +2046,89 @@ def make_sheet_validation_panel_experiments(sheet_name: str, validation_results:
     warning_records = len([k for k in sheet_sample_names if k in warning_map and k not in error_map])
     valid_records = total_records - error_records
 
-    # Count errors and warnings by field
-    error_fields_count = {}
+    # Collect errors and warnings by field with sample + message details
+    # Structure: {field: [(sample_descriptor, message), ...]}
+    errors_by_field = {}
+    seen_errors = set()
     for sample_descriptor, field_errors in error_map.items():
-        for field in field_errors.keys():
-            error_fields_count[field] = error_fields_count.get(field, 0) + 1
+        for field, messages in field_errors.items():
+            msgs = messages if isinstance(messages, list) else [messages]
+            for msg in msgs:
+                msg_str = str(msg)
+                key = (field, sample_descriptor, msg_str)
+                if key in seen_errors:
+                    continue
+                seen_errors.add(key)
+                errors_by_field.setdefault(field, []).append((sample_descriptor, msg_str))
 
-    warning_fields_count = {}
+    warnings_by_field = {}
+    seen_warnings = set()
     for sample_descriptor, field_warnings in warning_map.items():
-        for field in field_warnings.keys():
-            warning_fields_count[field] = warning_fields_count.get(field, 0) + 1
+        for field, messages in field_warnings.items():
+            msgs = messages if isinstance(messages, list) else [messages]
+            for msg in msgs:
+                msg_str = str(msg)
+                key = (field, sample_descriptor, msg_str)
+                if key in seen_warnings:
+                    continue
+                seen_warnings.add(key)
+                warnings_by_field.setdefault(field, []).append((sample_descriptor, msg_str))
 
     # Build report sections
     report_sections = []
 
-    # Errors by field
-    if error_fields_count:
-        error_items = sorted(error_fields_count.items(), key=lambda x: x[1], reverse=True)
-        report_sections.append(
-            html.Div([
-                html.H5("Errors by Field", style={
-                    'marginTop': '20px',
-                    'marginBottom': '15px',
-                    'color': '#f44336',
-                    'borderBottom': '2px solid #f44336',
-                    'paddingBottom': '8px'
-                }),
-                html.Ul([
-                    html.Li([
-                        html.Span(f"{field}: ", style={'fontWeight': 'bold'}),
-                        html.Span(f"{count} error(s)", style={'color': '#666'})
-                    ], style={'marginBottom': '6px'})
-                    for field, count in error_items
-                ], style={'padding': '10px', 'backgroundColor': '#ffebee', 'borderRadius': '6px',
-                          'listStylePosition': 'inside'})
-            ])
-        )
+    # Errors by field (expandable)
+    errors_section = _build_expandable_field_section(
+        "Errors by Field", errors_by_field, "error", '#f44336', '#ffebee', sheet_name
+    )
+    if errors_section:
+        report_sections.append(errors_section)
 
-    # Warnings by field
-    if warning_fields_count:
-        warning_items = sorted(warning_fields_count.items(), key=lambda x: x[1], reverse=True)
-        report_sections.append(
-            html.Div([
-                html.H5("Warnings by Field", style={
-                    'marginTop': '20px',
-                    'marginBottom': '15px',
-                    'color': '#ff9800',
-                    'borderBottom': '2px solid #ff9800',
-                    'paddingBottom': '8px'
-                }),
-                html.Ul([
-                    html.Li([
-                        html.Span(f"{field}: ", style={'fontWeight': 'bold'}),
-                        html.Span(f"{count} warning(s)", style={'color': '#666'})
-                    ], style={'marginBottom': '6px'})
-                    for field, count in warning_items
-                ], style={'padding': '10px', 'backgroundColor': '#fff3e0', 'borderRadius': '6px',
-                          'listStylePosition': 'inside'})
-            ])
-        )
+    # Warnings by field (expandable)
+    warnings_section = _build_expandable_field_section(
+        "Warnings by Field", warnings_by_field, "warning", '#ff9800', '#fff3e0', sheet_name
+    )
+    if warnings_section:
+        report_sections.append(warnings_section)
 
     # Total Summary
     if experiment_summary:
+        sheets_with_errors, sheets_with_warnings, sheets_with_relationship_errors = (
+            _compute_per_sheet_issue_attribution_experiments(validation_data, all_sheets_data)
+        )
         summary_items = []
         for key, value in experiment_summary.items():
             if isinstance(value, (int, float, str)):
                 display_key = key.replace('_', ' ').title()
+
+                attribution_sheets = None
+                try:
+                    int_value = int(value)
+                except (ValueError, TypeError):
+                    int_value = 0
+                if int_value > 0:
+                    key_lower = key.lower()
+                    if "invalid" in key_lower:
+                        attribution_sheets = sheets_with_errors
+                    elif "relationship_error" in key_lower:
+                        attribution_sheets = sheets_with_relationship_errors
+                    elif "warning" in key_lower:
+                        attribution_sheets = sheets_with_warnings
+
+                children = [
+                    html.Span(f"{display_key}: ", style={'fontWeight': 'bold'}),
+                    html.Span(str(value), style={'color': '#666'}),
+                ]
+                if attribution_sheets:
+                    children.append(
+                        html.Span(
+                            f"  (in: {', '.join(sorted(attribution_sheets))})",
+                            style={'color': '#1976D2', 'fontStyle': 'italic', 'marginLeft': '6px'},
+                        )
+                    )
+
                 summary_items.append(
-                    html.Div([
-                        html.Span(f"{display_key}: ", style={'fontWeight': 'bold'}),
-                        html.Span(str(value), style={'color': '#666'})
-                    ], style={'marginBottom': '8px'})
+                    html.Div(children, style={'marginBottom': '8px'})
                 )
         if summary_items:
             report_sections.append(
@@ -2122,41 +2233,20 @@ def _calculate_sheet_statistics_experiments(validation_results, all_sheets_data)
 
             errors, warnings = get_all_errors_and_warnings(record)
 
-            # Find which sheet contains this sample
-            # For experiments, try "Identifier" first, then "Sample Descriptor"
-            # OPTIMIZATION: Only iterate over sheets that were processed by backend
-            for sheet_name, sheet_records in (filtered_sheets_data or {}).items():
-                if not sheet_records:
-                    continue
-                sheet_sample_names = set()
-                for r in sheet_records:
-                    identifier = str(r.get("Sample Descriptor", "") or r.get("sample_descriptor", ""))
+            sheet_name = experiment_type  # experiment_type IS the sheet name
+            if sheet_name not in sheet_stats:
+                continue
 
-                    if identifier:
-                        sheet_sample_names.add(identifier)
-
-
-                if sample_descriptor in sheet_sample_names:
-                    if sheet_name not in sheet_stats:
-                        sheet_stats[sheet_name] = {
-                            'total_records': len(sheet_records),
-                            'valid_records': 0,
-                            'error_records': 0,
-                            'warning_records': 0,
-                            'sample_status': {}
-                        }
-
-                    if sample_descriptor not in sheet_stats[sheet_name]['sample_status']:
-                        if errors:
-                            sheet_stats[sheet_name]['error_records'] += 1
-                            sheet_stats[sheet_name]['sample_status'][sample_descriptor] = 'error'
-                        elif warnings:
-                            sheet_stats[sheet_name]['warning_records'] += 1
-                            sheet_stats[sheet_name]['sample_status'][sample_descriptor] = 'warning'
-                        else:
-                            sheet_stats[sheet_name]['valid_records'] += 1
-                            sheet_stats[sheet_name]['sample_status'][sample_descriptor] = 'valid'
-                    break
+            if sample_descriptor not in sheet_stats[sheet_name]['sample_status']:
+                if errors:
+                    sheet_stats[sheet_name]['error_records'] += 1
+                    sheet_stats[sheet_name]['sample_status'][sample_descriptor] = 'error'
+                elif warnings:
+                    sheet_stats[sheet_name]['warning_records'] += 1
+                    sheet_stats[sheet_name]['sample_status'][sample_descriptor] = 'warning'
+                else:
+                    sheet_stats[sheet_name]['valid_records'] += 1
+                    sheet_stats[sheet_name]['sample_status'][sample_descriptor] = 'valid'
 
     # Correct valid counts
     for sheet_name in sheet_stats:
