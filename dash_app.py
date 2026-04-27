@@ -18,8 +18,6 @@ from tab_components import create_tab_content
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
                                  'https://faang-validator-backend-service-341387543760.europe-west2.run.app')
 
-# https://faang-validator-backend-service-964531885708.europe-west2.run.app
-
 # Initialize the Dash app
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 server = app.server  # Expose server variable for gunicorn
@@ -304,6 +302,43 @@ def get_all_errors_and_warnings(record):
         warnings[field_to_blame].extend(record['relationship_errors'])
 
     return errors, warnings
+
+def _compute_per_sheet_issue_attribution(validation_data, all_sheets_data):
+    results_by_type = validation_data.get('sample_results', {}) or {}
+    sample_types = validation_data.get('sample_types_processed', []) or []
+
+    sheets_with_errors = set()
+    sheets_with_warnings = set()
+    sheets_with_relationship_errors = set()
+
+    for sh_name, sheet_records in (all_sheets_data or {}).items():
+        sheet_sample_names = {str(r.get("Sample Name", "")) for r in sheet_records}
+
+        for sample_type in sample_types:
+            st_data = results_by_type.get(sample_type, {}) or {}
+            st_key = sample_type.replace(' ', '_')
+            invalid_key = f"invalid_{st_key}s"
+            valid_key = f"valid_{st_key}s"
+            for record in st_data.get(invalid_key, []) + st_data.get(valid_key, []):
+                sample_name = record.get("sample_name", "")
+                if sample_name not in sheet_sample_names:
+                    continue
+
+                errors_section = record.get('errors') or {}
+
+                # Relationship errors — checked at both known locations
+                if record.get('relationship_errors') or errors_section.get('relationship_errors'):
+                    sheets_with_relationship_errors.add(sh_name)
+
+                # Non-relationship errors
+                if errors_section.get('field_errors') or errors_section.get('errors'):
+                    sheets_with_errors.add(sh_name)
+
+                # Non-relationship warnings
+                if record.get('field_warnings') or record.get('ontology_warnings'):
+                    sheets_with_warnings.add(sh_name)
+
+    return sheets_with_errors, sheets_with_warnings, sheets_with_relationship_errors
 
 
 def _build_expandable_field_section(title, field_to_entries, noun, accent_color, bg_color, sheet_name=""):
@@ -2112,15 +2147,42 @@ def make_sheet_validation_panel(sheet_name: str, validation_results: dict, all_s
 
     # Total Summary
     if total_summary:
+        sheets_with_errors, sheets_with_warnings, sheets_with_relationship_errors = _compute_per_sheet_issue_attribution(
+            validation_data, all_sheets_data)
         total_summary_items = []
         for key, value in total_summary.items():
             if isinstance(value, (int, float, str)):
                 display_key = key.replace('_', ' ').title()
+
+                # Decide which sheet list to attribute, based on the key
+                attribution_sheets = None
+                try:
+                    int_value = int(value)
+                except (ValueError, TypeError):
+                    int_value = 0
+                if int_value > 0:
+                    key_lower = key.lower()
+                    if "invalid" in key_lower:
+                        attribution_sheets = sheets_with_errors
+                    elif "relationship_error" in key_lower:
+                        attribution_sheets = sheets_with_relationship_errors
+                    elif "warning" in key_lower:
+                        attribution_sheets = sheets_with_warnings
+
+                children = [
+                    html.Span(f"{display_key}: ", style={'fontWeight': 'bold'}),
+                    html.Span(str(value), style={'color': '#666'}),
+                ]
+                if attribution_sheets:
+                    children.append(
+                        html.Span(
+                            f"  (in: {', '.join(sorted(attribution_sheets))})",
+                            style={'color': '#1976D2', 'fontStyle': 'italic', 'marginLeft': '6px'},
+                        )
+                    )
+
                 total_summary_items.append(
-                    html.Div([
-                        html.Span(f"{display_key}: ", style={'fontWeight': 'bold'}),
-                        html.Span(str(value), style={'color': '#666'})
-                    ], style={'marginBottom': '8px'})
+                    html.Div(children, style={'marginBottom': '8px'})
                 )
         if total_summary_items:
             report_sections.append(
