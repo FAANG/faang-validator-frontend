@@ -327,7 +327,7 @@ def register_analysis_callbacks(app):
         [Input('validate-button-analysis', 'n_clicks')],
         [State('stored-file-data-analysis', 'data'),
          State('stored-filename-analysis', 'data'),
-         State('biosamples-action-analysis', 'value'),
+         State('biosamples-action-analysis', 'data'),
          State('output-data-upload-analysis', 'children'),
          State('stored-all-sheets-data-analysis', 'data'),
          State('stored-sheet-names-analysis', 'data'),
@@ -450,22 +450,37 @@ def register_analysis_callbacks(app):
                 html.Div(id='validation-results-container-analysis', style={'margin': '20px 0'})
             ]
         else:
+            # Derive validation status summary (analyses)
+            if invalid_count and invalid_count > 0:
+                status_text = f"Errors ({invalid_count} invalid analysis" + ("es)" if invalid_count != 1 else ")")
+                status_color = "#c62828"
+            else:
+                status_text = "Success"
+                status_color = "green"
+
             # Normal case: show full Conversion and Validation panel + container.
             validation_components = [
                 dcc.Store(id='stored-error-data-analysis', data=error_data),
-                dcc.Store(id='stored-validation-results-analysis', data={'valid_count': valid_count, 'invalid_count': invalid_count,
-                                                                'all_sheets_data': all_sheets_validation_data}),
+                dcc.Store(
+                    id='stored-validation-results-analysis',
+                    data={
+                        'valid_count': valid_count,
+                        'invalid_count': invalid_count,
+                        'all_sheets_data': all_sheets_validation_data,
+                    },
+                ),
                 html.H3("2. Conversion and Validation results"),
-
-                html.Div([
-                    html.P("Conversion Status", style={'fontWeight': 'bold'}),
-                    html.P("Success", style={'color': 'green', 'fontWeight': 'bold'}),
-                    html.P("Validation Status", style={'fontWeight': 'bold'}),
-                    html.P("Finished", style={'color': 'green', 'fontWeight': 'bold'}),
-                ], style={'margin': '10px 0'}),
-
+                html.Div(
+                    [
+                        html.P("Conversion Status", style={'fontWeight': 'bold'}),
+                        html.P("Success", style={'color': 'green', 'fontWeight': 'bold'}),
+                        html.P("Validation Status", style={'fontWeight': 'bold'}),
+                        html.P(status_text, style={'color': status_color, 'fontWeight': 'bold'}),
+                    ],
+                    style={'margin': '10px 0'},
+                ),
                 html.Div(id='error-table-container-analysis', style={'display': 'none'}),
-                html.Div(id='validation-results-container-analysis', style={'margin': '20px 0'})
+                html.Div(id='validation-results-container-analysis', style={'margin': '20px 0'}),
             ]
 
         if current_children is None:
@@ -588,7 +603,7 @@ def register_analysis_callbacks(app):
         Input("biosamples-submit-btn-ena-analysis", "n_clicks"),
         State("biosamples-username-ena-analysis", "value"),
         State("biosamples-password-ena-analysis", "value"),
-        State("biosamples-action-analysis", "value"),
+        State("biosamples-action-analysis", "data"),
         State("stored-json-validation-results-analysis", "data"),
         State("stored-parsed-json-analysis", "data"),
         prevent_initial_call=True,

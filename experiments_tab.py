@@ -393,7 +393,7 @@ def register_experiments_callbacks(app):
         [Input('validate-button-experiments', 'n_clicks')],
         [State('stored-file-data-experiments', 'data'),
          State('stored-filename-experiments', 'data'),
-         State('biosamples-action-experiments', 'value'),
+         State('biosamples-action-experiments', 'data'),
          State('output-data-upload-experiments', 'children')],
         prevent_initial_call=True
     )
@@ -516,17 +516,29 @@ def register_experiments_callbacks(app):
                 html.Div(id='validation-results-container-experiments', style={'margin': '20px 0'})
             ]
         else:
+            # Compute validation status summary
+            valid_cnt, invalid_cnt = _valid_invalid_experiments_counts(json_validation_results)
+            if invalid_cnt and invalid_cnt > 0:
+                status_text = f"Errors ({invalid_cnt} invalid experiment" + ("s)" if invalid_cnt != 1 else ")")
+                status_color = "#c62828"
+            else:
+                status_text = "Success"
+                status_color = "green"
+
             # Normal case: show full Conversion and Validation panel + container.
             validation_components = [
                 html.H3("2. Conversion and Validation results"),
-                html.Div([
-                    html.P("Conversion Status", style={'fontWeight': 'bold'}),
-                    html.P("Success", style={'color': 'green', 'fontWeight': 'bold'}),
-                    html.P("Validation Status", style={'fontWeight': 'bold'}),
-                    html.P("Finished", style={'color': 'green', 'fontWeight': 'bold'}),
-                ], style={'margin': '10px 0'}),
+                html.Div(
+                    [
+                        html.P("Conversion Status", style={'fontWeight': 'bold'}),
+                        html.P("Success", style={'color': 'green', 'fontWeight': 'bold'}),
+                        html.P("Validation Status", style={'fontWeight': 'bold'}),
+                        html.P(status_text, style={'color': status_color, 'fontWeight': 'bold'}),
+                    ],
+                    style={'margin': '10px 0'},
+                ),
                 html.Div(id='error-table-container-experiments', style={'display': 'none'}),
-                html.Div(id='validation-results-container-experiments', style={'margin': '20px 0'})
+                html.Div(id='validation-results-container-experiments', style={'margin': '20px 0'}),
             ]
 
         # Update the UI with validation results
@@ -667,7 +679,7 @@ def register_experiments_callbacks(app):
         Input("experiments-submit-btn-ena", "n_clicks"),
         State("experiments-username-ena", "value"),
         State("experiments-password-ena", "value"),
-        State("biosamples-action-experiments", "value"),
+        State("biosamples-action-experiments", "data"),
         State("stored-json-validation-results-experiments", "data"),
         State("stored-parsed-json-experiments", "data"),
         prevent_initial_call=True,
