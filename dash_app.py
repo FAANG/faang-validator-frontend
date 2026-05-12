@@ -2560,6 +2560,8 @@ def _disable_submit(u, p, v):
         Output("samples-submission-results-panel", "children"),
         Output("samples-submission-results-panel", "style"),
         Output("samples-submission-results-store", "data"),
+        Output("samples-submission-results-xml-download", "data", allow_duplicate=True),
+
     ],
     Input("biosamples-submit-btn-samples", "n_clicks"),
     State("biosamples-username-samples", "value"),
@@ -2580,7 +2582,7 @@ def _submit_to_biosamples(n, username, password, env, action, v):
             "No validation results available. Please validate your file first.",
             style={"color": "#c62828", "fontWeight": 500},
         )
-        return msg, dash.no_update, dash.no_update, hidden_style, None
+        return msg, dash.no_update, dash.no_update, hidden_style, None, dash.no_update
 
     valid_cnt, invalid_cnt = _valid_invalid_counts(v)
     if valid_cnt == 0:
@@ -2588,14 +2590,14 @@ def _submit_to_biosamples(n, username, password, env, action, v):
             "No valid samples to submit. Please fix errors and re-validate.",
             style={"color": "#c62828", "fontWeight": 500},
         )
-        return msg, dash.no_update, dash.no_update, hidden_style, None
+        return msg, dash.no_update, dash.no_update, hidden_style, None, dash.no_update
 
     if not username or not password:
         msg = html.Span(
             "Please enter Webin username and password.",
             style={"color": "#c62828", "fontWeight": 500},
         )
-        return msg, dash.no_update, dash.no_update, hidden_style, None
+        return msg, dash.no_update, dash.no_update, hidden_style, None, dash.no_update
 
     validation_results = v["results"]
 
@@ -2616,7 +2618,7 @@ def _submit_to_biosamples(n, username, password, env, action, v):
                 f"Submission failed [{r.status_code}]: {r.text}",
                 style={"color": "#c62828", "fontWeight": 500},
             )
-            return msg, dash.no_update, dash.no_update, hidden_style, None
+            return msg, dash.no_update, dash.no_update, hidden_style, None, dash.no_update
 
         data = r.json() if r.content else {}
 
@@ -2624,30 +2626,104 @@ def _submit_to_biosamples(n, username, password, env, action, v):
         message = data.get("message", "No message from server")
         submitted_count = data.get("submitted_count")
         errors = data.get("errors") or []
+        failed_sample = data.get("failed_sample")
+        status_code = data.get("status_code")
+        details = data.get("details")
+
+        if isinstance(errors, str):
+            errors = [errors]
+        elif isinstance(errors, dict):
+            errors = [errors.get("message") or errors.get("error") or str(errors)]
+        elif not isinstance(errors, list):
+            errors = [str(errors)]
+        else:
+            errors = [
+                (err.get("message") or err.get("error") or str(err))
+                if isinstance(err, dict)
+                else str(err)
+                for err in errors
+            ]
+
+        errors = [err for err in errors if err]
+
+
         info_messages = data.get("info_messages") or []
         submission_results_xml = data.get("submission_results") or ""
         biosamples_ids = data.get("biosamples_ids") or {}
 
         color = "#388e3c" if success else "#c62828"
 
-        msg_children = [html.Span(message, style={"fontWeight": 500})]
-        if submitted_count is not None:
-            msg_children += [
-                html.Br(),
-                html.Span(f"Submitted samples: {submitted_count}"),
-            ]
+        successful_count = submitted_count if submitted_count is not None else len(biosamples_ids)
 
-        # If no BioSample IDs were returned, surface a clear red error immediately
-        if not biosamples_ids:
-            msg_children = [
-                               html.Span(
-                                   "Error: submission failed",
-                                   style={"fontWeight": 600, "color": "#c62828"},
-                               ),
-                               html.Br(),
-                           ] + msg_children
+        sections = []
 
-        msg = html.Div(msg_children, style={"color": color})
+        if biosamples_ids:
+            if success:
+                success_title = f"{successful_count} sample(s) were submitted successfully to BioSamples."
+                success_body = "Keep the BioSample IDs shown below for future updates."
+            else:
+                success_title = f"{successful_count} sample(s) were submitted before the failure."
+                success_body = "Do not submit these again as new samples. Keep the BioSample IDs shown below."
+
+            sections.append(
+                html.Div(
+                    [
+                        html.Div(
+                            success_title,
+                            style={"fontWeight": 700, "marginBottom": "6px"},
+                        ),
+                        html.Div(success_body),
+                    ],
+                    style={
+                        "backgroundColor": "#e8f5e9",
+                        "border": "1px solid #a5d6a7",
+                        "borderRadius": "6px",
+                        "padding": "12px",
+                        "color": "#1b5e20",
+                        "marginBottom": "12px",
+                    },
+                )
+            )
+
+        if not success:
+            failure_items = []
+
+            if failed_sample:
+                failure_items.append(html.Li([html.Strong("Failed sample: "), failed_sample]))
+            if status_code:
+                failure_items.append(html.Li([html.Strong("Status: "), str(status_code)]))
+            if details:
+                failure_items.append(html.Li([html.Strong("Details: "), details]))
+
+            for err in errors:
+                if err and err != details:
+                    failure_items.append(html.Li(err))
+
+            if not failure_items:
+                failure_items.append(html.Li(message or "Submission failed"))
+
+            sections.append(
+                html.Div(
+                    [
+                        html.Div(
+                            "Submission failed",
+                            style={"fontWeight": 700, "marginBottom": "6px"},
+                        ),
+                        html.Ul(failure_items, style={"margin": 0, "paddingLeft": "20px"}),
+                    ],
+                    style={
+                        "backgroundColor": "#fff5f5",
+                        "border": "1px solid #f5c2c7",
+                        "borderRadius": "6px",
+                        "padding": "12px",
+                        "color": "#842029",
+                        "maxWidth": "900px",
+                        "whiteSpace": "pre-wrap",
+                    },
+                )
+            )
+
+        msg = html.Div(sections, style={"marginTop": "10px"})
 
         table = None
         if biosamples_ids:
@@ -2729,14 +2805,30 @@ def _submit_to_biosamples(n, username, password, env, action, v):
             "backgroundColor": "#f8fafc",
         }
 
-        return msg, table, panel_children, panel_style, biosamples_ids
+        auto_download = (
+            dcc.send_string(
+                "\n".join(
+                    ["Sample Name\tBioSample ID"] +
+                    [
+                        f"{str(name).replace(chr(9), ' ').replace(chr(10), ' ')}\t{str(acc).replace(chr(9), ' ').replace(chr(10), ' ')}"
+                        for name, acc in biosamples_ids.items()
+                    ]
+                ),
+                "biosample_submission_results.tsv",
+            )
+            if biosamples_ids
+            else dash.no_update
+        )
+
+        return msg, table, panel_children, panel_style, biosamples_ids, auto_download
 
     except Exception as e:
         msg = html.Span(
             f"Submission error: {e}",
             style={"color": "#c62828", "fontWeight": 500},
         )
-        return msg, dash.no_update, dash.no_update, hidden_style, None
+        return msg, dash.no_update, dash.no_update, hidden_style, None, dash.no_update
+
 
 
 @app.callback(
