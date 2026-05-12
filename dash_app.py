@@ -2582,7 +2582,7 @@ def _submit_to_biosamples(n, username, password, env, action, v):
             "No validation results available. Please validate your file first.",
             style={"color": "#c62828", "fontWeight": 500},
         )
-        return msg, dash.no_update, dash.no_update, hidden_style, None
+        return msg, dash.no_update, dash.no_update, hidden_style, None, dash.no_update
 
     valid_cnt, invalid_cnt = _valid_invalid_counts(v)
     if valid_cnt == 0:
@@ -2590,14 +2590,14 @@ def _submit_to_biosamples(n, username, password, env, action, v):
             "No valid samples to submit. Please fix errors and re-validate.",
             style={"color": "#c62828", "fontWeight": 500},
         )
-        return msg, dash.no_update, dash.no_update, hidden_style, None
+        return msg, dash.no_update, dash.no_update, hidden_style, None, dash.no_update
 
     if not username or not password:
         msg = html.Span(
             "Please enter Webin username and password.",
             style={"color": "#c62828", "fontWeight": 500},
         )
-        return msg, dash.no_update, dash.no_update, hidden_style, None
+        return msg, dash.no_update, dash.no_update, hidden_style, None, dash.no_update
 
     validation_results = v["results"]
 
@@ -2618,7 +2618,7 @@ def _submit_to_biosamples(n, username, password, env, action, v):
                 f"Submission failed [{r.status_code}]: {r.text}",
                 style={"color": "#c62828", "fontWeight": 500},
             )
-            return msg, dash.no_update, dash.no_update, hidden_style, None
+            return msg, dash.no_update, dash.no_update, hidden_style, None, dash.no_update
 
         data = r.json() if r.content else {}
 
