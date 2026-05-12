@@ -2560,6 +2560,8 @@ def _disable_submit(u, p, v):
         Output("samples-submission-results-panel", "children"),
         Output("samples-submission-results-panel", "style"),
         Output("samples-submission-results-store", "data"),
+        Output("samples-submission-results-xml-download", "data", allow_duplicate=True),
+
     ],
     Input("biosamples-submit-btn-samples", "n_clicks"),
     State("biosamples-username-samples", "value"),
@@ -2656,16 +2658,21 @@ def _submit_to_biosamples(n, username, password, env, action, v):
         sections = []
 
         if biosamples_ids:
+            if success:
+                success_title = f"{successful_count} sample(s) were submitted successfully to BioSamples."
+                success_body = "Keep the BioSample IDs shown below for future updates."
+            else:
+                success_title = f"{successful_count} sample(s) were submitted before the failure."
+                success_body = "Do not submit these again as new samples. Keep the BioSample IDs shown below."
+
             sections.append(
                 html.Div(
                     [
                         html.Div(
-                            f"{successful_count} sample(s) were submitted before the failure.",
+                            success_title,
                             style={"fontWeight": 700, "marginBottom": "6px"},
                         ),
-                        html.Div(
-                            "Do not submit these again as new samples. Keep the BioSample IDs shown below.",
-                        ),
+                        html.Div(success_body),
                     ],
                     style={
                         "backgroundColor": "#e8f5e9",
@@ -2798,14 +2805,30 @@ def _submit_to_biosamples(n, username, password, env, action, v):
             "backgroundColor": "#f8fafc",
         }
 
-        return msg, table, panel_children, panel_style, biosamples_ids
+        auto_download = (
+            dcc.send_string(
+                "\n".join(
+                    ["Sample Name\tBioSample ID"] +
+                    [
+                        f"{str(name).replace(chr(9), ' ').replace(chr(10), ' ')}\t{str(acc).replace(chr(9), ' ').replace(chr(10), ' ')}"
+                        for name, acc in biosamples_ids.items()
+                    ]
+                ),
+                "biosample_submission_results.tsv",
+            )
+            if biosamples_ids
+            else dash.no_update
+        )
+
+        return msg, table, panel_children, panel_style, biosamples_ids, auto_download
 
     except Exception as e:
         msg = html.Span(
             f"Submission error: {e}",
             style={"color": "#c62828", "fontWeight": 500},
         )
-        return msg, dash.no_update, dash.no_update, hidden_style, None
+        return msg, dash.no_update, dash.no_update, hidden_style, None, dash.no_update
+
 
 
 @app.callback(
