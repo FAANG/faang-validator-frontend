@@ -2624,30 +2624,99 @@ def _submit_to_biosamples(n, username, password, env, action, v):
         message = data.get("message", "No message from server")
         submitted_count = data.get("submitted_count")
         errors = data.get("errors") or []
+        failed_sample = data.get("failed_sample")
+        status_code = data.get("status_code")
+        details = data.get("details")
+
+        if isinstance(errors, str):
+            errors = [errors]
+        elif isinstance(errors, dict):
+            errors = [errors.get("message") or errors.get("error") or str(errors)]
+        elif not isinstance(errors, list):
+            errors = [str(errors)]
+        else:
+            errors = [
+                (err.get("message") or err.get("error") or str(err))
+                if isinstance(err, dict)
+                else str(err)
+                for err in errors
+            ]
+
+        errors = [err for err in errors if err]
+
+
         info_messages = data.get("info_messages") or []
         submission_results_xml = data.get("submission_results") or ""
         biosamples_ids = data.get("biosamples_ids") or {}
 
         color = "#388e3c" if success else "#c62828"
 
-        msg_children = [html.Span(message, style={"fontWeight": 500})]
-        if submitted_count is not None:
-            msg_children += [
-                html.Br(),
-                html.Span(f"Submitted samples: {submitted_count}"),
-            ]
+        successful_count = submitted_count if submitted_count is not None else len(biosamples_ids)
 
-        # If no BioSample IDs were returned, surface a clear red error immediately
-        if not biosamples_ids:
-            msg_children = [
-                               html.Span(
-                                   "Error: submission failed",
-                                   style={"fontWeight": 600, "color": "#c62828"},
-                               ),
-                               html.Br(),
-                           ] + msg_children
+        sections = []
 
-        msg = html.Div(msg_children, style={"color": color})
+        if biosamples_ids:
+            sections.append(
+                html.Div(
+                    [
+                        html.Div(
+                            f"{successful_count} sample(s) were submitted before the failure.",
+                            style={"fontWeight": 700, "marginBottom": "6px"},
+                        ),
+                        html.Div(
+                            "Do not submit these again as new samples. Keep the BioSample IDs shown below.",
+                        ),
+                    ],
+                    style={
+                        "backgroundColor": "#e8f5e9",
+                        "border": "1px solid #a5d6a7",
+                        "borderRadius": "6px",
+                        "padding": "12px",
+                        "color": "#1b5e20",
+                        "marginBottom": "12px",
+                    },
+                )
+            )
+
+        if not success:
+            failure_items = []
+
+            if failed_sample:
+                failure_items.append(html.Li([html.Strong("Failed sample: "), failed_sample]))
+            if status_code:
+                failure_items.append(html.Li([html.Strong("Status: "), str(status_code)]))
+            if details:
+                failure_items.append(html.Li([html.Strong("Details: "), details]))
+
+            for err in errors:
+                if err and err != details:
+                    failure_items.append(html.Li(err))
+
+            if not failure_items:
+                failure_items.append(html.Li(message or "Submission failed"))
+
+            sections.append(
+                html.Div(
+                    [
+                        html.Div(
+                            "Submission failed",
+                            style={"fontWeight": 700, "marginBottom": "6px"},
+                        ),
+                        html.Ul(failure_items, style={"margin": 0, "paddingLeft": "20px"}),
+                    ],
+                    style={
+                        "backgroundColor": "#fff5f5",
+                        "border": "1px solid #f5c2c7",
+                        "borderRadius": "6px",
+                        "padding": "12px",
+                        "color": "#842029",
+                        "maxWidth": "900px",
+                        "whiteSpace": "pre-wrap",
+                    },
+                )
+            )
+
+        msg = html.Div(sections, style={"marginTop": "10px"})
 
         table = None
         if biosamples_ids:
