@@ -3,16 +3,17 @@ Reusable components for validation tabs (Samples, Experiments, etc.)
 """
 from dash import dcc, html
 
-sample_metadata_template_with_examples = '../../assets/with_examples/faang_sample.xlsx'
-sample_biosample_update_template = '../../assets/with_examples/faang_update_sample.xlsx'
-experiment_metadata_template_with_examples = '../../assets/with_examples/faang_experiment.xlsx'
-analysis_metadata_template_with_examples = '../../assets/with_examples/faang_analysis.xlsx'
-trackhubs_template_with_examples = '../../assets/with_examples/trackhubs.xlsx'
+sample_metadata_template_with_examples = '/assets/with_examples/faang_sample.xlsx'
+sample_biosample_update_template = '/assets/with_examples/faang_update_sample.xlsx'
+experiment_metadata_template_with_examples = '/assets/with_examples/faang_experiment.xlsx'
+analysis_metadata_template_with_examples = '/assets/with_examples/faang_analysis.xlsx'
+trackhubs_template_with_examples = '/assets/with_examples/trackhubs.xlsx'
 
-sample_metadata_template_without_examples = '../../assets/empty/faang_sample.xlsx'
-experiment_metadata_template_without_examples = '../../assets/empty/faang_experiment.xlsx'
-analysis_metadata_template_without_examples = '../../assets/empty/faang_analysis.xlsx'
-trackhubs_template_without_examples = '../../assets/empty/trackhubs.xlsx'
+sample_metadata_template_without_examples = '/assets/empty/faang_sample.xlsx'
+experiment_metadata_template_without_examples = '/assets/empty/faang_experiment.xlsx'
+experiment_metadata_template_scATAC = '/assets/empty/faang_experiment_scATAC-seq.xlsx'
+analysis_metadata_template_without_examples = '/assets/empty/faang_analysis.xlsx'
+trackhubs_template_without_examples = '/assets/empty/trackhubs.xlsx'
 
 
 def _link_button_style(bg: str, fg: str = "white") -> dict:
@@ -36,21 +37,21 @@ def _header_buttons_samples():
             html.A(
                 "Download example template",
                 id="samples-download-example-template-btn",
-                href=sample_metadata_template_with_examples.replace('../../assets', '/assets'),
+                href=sample_metadata_template_with_examples,
                 target="_blank",
                 style=_link_button_style("#673ab7"),
             ),
             html.A(
                 "Download empty template",
                 id="samples-download-empty-template-btn",
-                href=sample_metadata_template_without_examples.replace('../../assets', '/assets'),
+                href=sample_metadata_template_without_examples,
                 target="_blank",
                 style=_link_button_style("#673ab7"),
             ),
             html.A(
                 "Download example template for UPDATE",
                 id="samples-download-update-template-btn",
-                href=sample_biosample_update_template.replace('../../assets', '/assets'),
+                href=sample_biosample_update_template,
                 target="_blank",
                 style=_link_button_style("#673ab7"),
             ),
@@ -84,14 +85,21 @@ def _header_buttons_experiments():
             html.A(
                 "Download example template",
                 id="experiments-download-example-template-btn",
-                href=experiment_metadata_template_with_examples.replace("../../assets", "/assets"),
+                href=experiment_metadata_template_with_examples,
                 target="_blank",
                 style=_link_button_style("#673ab7"),
             ),
             html.A(
                 "Download empty template",
                 id="experiments-download-empty-template-btn",
-                href=experiment_metadata_template_without_examples.replace("../../assets", "/assets"),
+                href=experiment_metadata_template_without_examples,
+                target="_blank",
+                style=_link_button_style("#673ab7"),
+            ),
+            html.A(
+                "Download scATAC-seq template",
+                id="experiments-download-scATAC-seq-template-btn",
+                href=experiment_metadata_template_scATAC,
                 target="_blank",
                 style=_link_button_style("#673ab7"),
             ),
@@ -125,14 +133,14 @@ def _header_buttons_analysis():
             html.A(
                 "Download example template",
                 id="analysis-download-example-template-btn",
-                href=analysis_metadata_template_with_examples.replace("../../assets", "/assets"),
+                href=analysis_metadata_template_with_examples,
                 target="_blank",
                 style=_link_button_style("#673ab7"),
             ),
             html.A(
                 "Download empty template",
                 id="analysis-download-empty-template-btn",
-                href=analysis_metadata_template_without_examples.replace("../../assets", "/assets"),
+                href=analysis_metadata_template_without_examples,
                 target="_blank",
                 style=_link_button_style("#673ab7"),
             ),
