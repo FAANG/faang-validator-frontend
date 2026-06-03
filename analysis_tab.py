@@ -950,7 +950,7 @@ def register_analysis_callbacks(app):
                         return;
                     }
 
-                    let originalText = tab.textContent || tab.innerText || '';
+                    let originalText = (tab.textContent || tab.innerText || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
                     
                     if (!originalText || (!originalText.includes('valid') && !originalText.includes('invalid'))) {
                         return;

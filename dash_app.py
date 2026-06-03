@@ -1543,8 +1543,10 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
         # Make sheet name title case (first letter of each word capital)
         sheet_name_title = sheet_name.title()
 
-        # Create label using sample_results summary with inline green color for valid count
-        label = f"{sheet_name_title} (<span style='color: #4CAF50; font-weight: bold;'>{valid_count} valid </span>/ {invalid_count} invalid)"
+        # Create label using sample_results summary. The valid/invalid counts are
+        # colored client-side by the tab-styling callback (which safely HTML-escapes
+        # the untrusted sheet name before it touches innerHTML).
+        label = f"{sheet_name_title} ({valid_count} valid / {invalid_count} invalid)"
 
         sheets_with_data.append(sheet_name)
         sheet_tabs.append(
@@ -1640,7 +1642,7 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
                    tabLabels.forEach((tab, index) => {
                        // Get the text content
                        let textElement = tab;
-                       let originalText = tab.textContent || tab.innerText || '';
+                       let originalText = (tab.textContent || tab.innerText || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
                        // If the tab has children, check them for text
                        if (tab.children && tab.children.length > 0) {
@@ -1648,7 +1650,7 @@ def populate_validation_results_tabs(validation_results, sheet_names, all_sheets
                                const childText = child.textContent || child.innerText || '';
                                if (childText && (childText.includes('valid') || childText.includes('invalid'))) {
                                    textElement = child;
-                                   originalText = childText;
+                                   originalText = String(childText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
                                    break;
                                }
                            }
@@ -3044,7 +3046,7 @@ app.clientside_callback(
 
             tabLabels.forEach((tab) => {
                 let textElement = tab;
-                let originalText = tab.textContent || tab.innerText || '';
+                let originalText = (tab.textContent || tab.innerText || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
                 // Check children for text
                 if (tab.children && tab.children.length > 0) {
@@ -3052,7 +3054,7 @@ app.clientside_callback(
                         const childText = child.textContent || child.innerText || '';
                         if (childText && (childText.includes('valid') || childText.includes('invalid'))) {
                             textElement = child;
-                            originalText = childText;
+                            originalText = String(childText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
                             break;
                         }
                     }
