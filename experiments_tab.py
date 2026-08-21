@@ -320,7 +320,6 @@ def _valid_invalid_experiments_counts(v):
 
 
 def _build_experiments_progress_msg(job, status):
-    """In-progress status message shown while an experiment submission job runs."""
     labels = {
         "queued": "Submission queued\u2026",
         "running": "Submitting to ENA\u2026",
@@ -342,11 +341,6 @@ def _build_experiments_progress_msg(job, status):
 
 
 def _render_experiments_submission_result(data):
-    """Build the Experiments submission result UI from a completed/failed job payload.
-
-    `data` is shaped like the legacy synchronous response. Returns
-    (msg, table, panel_children, panel_style, submission_results_xml).
-    """
     success = data.get("success", False)
     message = data.get("message", "No message from server")
     submitted_count = data.get("submitted_count")
@@ -833,7 +827,6 @@ def register_experiments_callbacks(app):
         prevent_initial_call=True,
     )
     def _start_experiments_submission(n, username, password, action, v, original_data):
-        """Kick off an async experiment submission and start polling for the job."""
         if not n:
             raise PreventUpdate
 
@@ -890,7 +883,6 @@ def register_experiments_callbacks(app):
         prevent_initial_call=True,
     )
     def _poll_experiments_submission(n_intervals, job_id):
-        """Poll the async experiment submission job and render results when it finishes."""
         if not job_id:
             raise PreventUpdate
 

@@ -192,7 +192,6 @@ def _valid_invalid_analysis_counts(v):
 
 
 def _build_analysis_progress_msg(job, status):
-    """In-progress status message shown while an analysis submission job runs."""
     labels = {
         "queued": "Submission queued\u2026",
         "running": "Submitting to ENA\u2026",
@@ -214,18 +213,12 @@ def _build_analysis_progress_msg(job, status):
 
 
 def _render_analysis_submission_result(data):
-    """Build the Analysis submission result UI from a completed/failed job payload.
-
-    `data` is shaped like the legacy synchronous response. Returns
-    (msg, table, panel_children, panel_style, submission_results_xml).
-    """
     success = data.get("success", False)
     message = data.get("message", "No message from server")
     submitted_count = data.get("submitted_count")
     errors = data.get("errors") or []
     info_messages = data.get("info_messages") or []
     submission_results_xml = data.get("submission_results") or ""
-    biosamples_ids = data.get("biosamples_ids") or {}
 
     color = "#388e3c" if success else "#c62828"
 
@@ -241,7 +234,7 @@ def _render_analysis_submission_result(data):
     msg = html.Div(msg_children, style={"color": color})
     table = html.Div()
 
-    # Build submission results panel content (no inline XML; info + errors + yellow button)
+    # Build submission results panel content
     panel_children = []
     if errors or info_messages or submission_results_xml:
         panel_children = [
@@ -296,7 +289,7 @@ def _render_analysis_submission_result(data):
                 )
             )
 
-        # Detailed submission errors after info (no heading)
+        # Detailed submission errors after info
         if errors:
             panel_children.append(
                 html.Div(
@@ -749,7 +742,6 @@ def register_analysis_callbacks(app):
         prevent_initial_call=True,
     )
     def _start_analysis_submission(n, username, password, action, v, original_data):
-        """Kick off an async analysis submission and start polling for the job."""
         if not n:
             raise PreventUpdate
 

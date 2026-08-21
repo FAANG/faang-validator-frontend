@@ -2554,7 +2554,6 @@ def _disable_submit(u, p, v):
 
 
 def _build_submission_progress_msg(job, status):
-    """Build the in-progress status message shown while a submission job runs."""
     labels = {
         "queued": "Submission queued\u2026",
         "running": "Submitting to BioSamples\u2026",
@@ -2576,12 +2575,6 @@ def _build_submission_progress_msg(job, status):
 
 
 def _render_samples_submission_result(data, env):
-    """Build the Samples submission result UI from a completed/failed job payload.
-
-    `data` is shaped like the legacy synchronous response (success, message,
-    submitted_count, errors, biosamples_ids, submission_results, ...). Returns
-    (msg, table, panel_children, panel_style, store_data, auto_download).
-    """
     success = data.get("success", False)
     message = data.get("message", "No message from server")
     submitted_count = data.get("submitted_count")
@@ -2605,14 +2598,7 @@ def _render_samples_submission_result(data, env):
         ]
 
     errors = [err for err in errors if err]
-
-
-    info_messages = data.get("info_messages") or []
-    submission_results_xml = data.get("submission_results") or ""
     biosamples_ids = data.get("biosamples_ids") or {}
-
-    color = "#388e3c" if success else "#c62828"
-
     successful_count = submitted_count if submitted_count is not None else len(biosamples_ids)
 
     sections = []
@@ -2717,7 +2703,7 @@ def _render_samples_submission_result(data, env):
             style_table={"overflowX": "auto"},
             style_cell={"textAlign": "left"},
         )
-    # Only show the Submission Results panel when we also have a table
+
     panel_children = []
     if biosamples_ids:
         panel_children = [
@@ -2803,7 +2789,6 @@ def _render_samples_submission_result(data, env):
     prevent_initial_call=True,
 )
 def _start_biosamples_submission(n, username, password, env, action, v):
-    """Kick off an async BioSamples submission and start polling for the job."""
     if not n:
         raise PreventUpdate
 
@@ -2811,7 +2796,7 @@ def _start_biosamples_submission(n, username, password, env, action, v):
 
     def _error(text):
         msg = html.Span(text, style={"color": "#c62828", "fontWeight": 500})
-        # Leave any previous results untouched; do not start the poller.
+        # Leave previous results untouched; do not start the poller.
         return (msg, dash.no_update, dash.no_update, dash.no_update,
                 None, None, True, 0)
 
@@ -2870,7 +2855,6 @@ def _start_biosamples_submission(n, username, password, env, action, v):
     prevent_initial_call=True,
 )
 def _poll_biosamples_submission(n_intervals, job_id, env):
-    """Poll the async submission job and render results when it finishes."""
     if not job_id:
         raise PreventUpdate
 
@@ -2922,7 +2906,7 @@ def _poll_biosamples_submission(n_intervals, job_id, env):
             rendered = _render_samples_submission_result(result, env)
             return (*rendered, True)
 
-        # Unknown / unexpected status: keep waiting rather than erroring out.
+        # Unknown / unexpected status
         return (dash.no_update, dash.no_update, dash.no_update, dash.no_update,
                 dash.no_update, dash.no_update, False)
 
