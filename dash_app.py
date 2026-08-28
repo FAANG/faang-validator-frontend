@@ -2555,26 +2555,51 @@ def _disable_submit(u, p, v):
 
 
 def _build_submission_progress_msg(job, status):
-    stage_labels = {
-        "preparing": "Preparing submission\u2026",
-        "submitting": "Submitting samples to BioSamples\u2026",
-        "relationships": "Linking sample relationships\u2026",
+    stage_styles = {
+        "preparing":     ("Preparing submission…",             "#e0f2f1", "#00897b", "#00695c"),
+        "submitting":    ("Submitting samples to BioSamples…", "#e3f2fd", "#1565c0", "#0d47a1"),
+        "relationships": ("Linking sample relationships…",     "#ede7f6", "#5e35b1", "#4527a0"),
     }
-    status_labels = {
-        "queued": "Submission queued\u2026",
-        "running": "Submitting to BioSamples\u2026",
-        "retrying": "Retrying submission\u2026",
+    status_styles = {
+        "queued":   ("Submission queued…",       "#eceff1", "#607d8b", "#37474f"),
+        "running":  ("Submitting to BioSamples…", "#e3f2fd", "#1565c0", "#0d47a1"),
+        "retrying": ("Retrying submission…",      "#fff8e1", "#ff8f00", "#e65100"),
     }
     stage = (job.get("stage") or "").lower()
-    label = stage_labels.get(stage) or status_labels.get((status or "").lower(), "Working\u2026")
-    parts = [html.Span(label, style={"fontWeight": 600})]
+    label, bg, accent, fg = (
+        stage_styles.get(stage)
+        or status_styles.get((status or "").lower())
+        or ("Working…", "#eceff1", "#607d8b", "#37474f")
+    )
 
     total = job.get("total")
-    submitted = job.get("submitted")
-    if total:
-        parts += [html.Br(), html.Span(f"Progress: {submitted or 0}/{total}")]
+    submitted = job.get("submitted") or 0
 
-    return html.Div(parts, style={"color": "#1565c0", "marginTop": "10px"})
+    children = [html.Div(label, style={"fontWeight": 700, "fontSize": "15px"})]
+    if total:
+        pct = max(0, min(100, round(100 * submitted / total)))
+        children.append(html.Div(
+            f"{submitted} / {total}  ({pct}%)",
+            style={"fontSize": "13px", "marginTop": "3px", "opacity": 0.85},
+        ))
+        children.append(html.Div(
+            html.Div(style={
+                "width": f"{pct}%", "height": "100%", "backgroundColor": accent,
+                "borderRadius": "5px", "transition": "width 0.3s ease",
+            }),
+            style={
+                "marginTop": "8px", "height": "9px", "width": "100%",
+                "backgroundColor": "rgba(0,0,0,0.08)", "borderRadius": "5px",
+                "overflow": "hidden",
+            },
+        ))
+
+    return html.Div(children, style={
+        "color": fg, "backgroundColor": bg,
+        "borderLeft": f"5px solid {accent}", "borderRadius": "8px",
+        "padding": "12px 16px", "marginTop": "10px",
+        "boxShadow": "0 1px 3px rgba(0,0,0,0.08)",
+    })
 
 
 def _render_samples_submission_result(data, env):
@@ -2891,7 +2916,12 @@ def _poll_biosamples_submission(n_intervals, job_id, env):
                 result["message"] = job.get("message") or "Submission complete."
             generating_msg = html.Div(
                 "Submission complete — generating results table…",
-                style={"color": "#1565c0", "fontWeight": 600, "marginTop": "10px"},
+                style={
+                    "color": "#1b5e20", "backgroundColor": "#e8f5e9",
+                    "borderLeft": "5px solid #2e7d32", "borderRadius": "8px",
+                    "padding": "12px 16px", "marginTop": "10px",
+                    "fontWeight": 700, "boxShadow": "0 1px 3px rgba(0,0,0,0.08)",
+                },
             )
             return (generating_msg, dash.no_update, dash.no_update, dash.no_update,
                     dash.no_update, dash.no_update, True, result)
@@ -2938,8 +2968,6 @@ def _poll_biosamples_submission(n_intervals, job_id, env):
 def _render_samples_results(result, env):
     if not result:
         raise PreventUpdate
-    import time  # TEMP demo: remove these two lines after verifying the message
-    time.sleep(2)  # TEMP demo: makes 'generating…' visible even on small files
     return _render_samples_submission_result(result, env)
 
 
