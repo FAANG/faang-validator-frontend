@@ -2729,6 +2729,28 @@ def _render_samples_submission_result(data, env):
             page_size=10,
             style_table={"overflowX": "auto"},
             style_cell={"textAlign": "left"},
+            css=[
+                {
+                    "selector": ".dash-cell a",
+                    "rule": (
+                        "color: #4682b4;"
+                        "font-family: ui-monospace, SFMono-Regular, Menlo, monospace;"
+                        "font-weight: 600;"
+                        "text-decoration: none;"
+                        "border-bottom: 1px solid rgba(70,130,180,0.35);"
+                        "padding-bottom: 1px;"
+                        "transition: color 0.15s ease, border-color 0.15s ease;"
+                    ),
+                },
+                {
+                    "selector": ".dash-cell a:hover",
+                    "rule": "color: #2c5f8a; border-bottom-color: #2c5f8a;",
+                },
+                {
+                    "selector": ".dash-cell a:visited",
+                    "rule": "color: #4682b4;",
+                },
+            ],
         )
 
     panel_children = []
