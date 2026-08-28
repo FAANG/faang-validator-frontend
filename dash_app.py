@@ -619,6 +619,7 @@ app.layout = html.Div([
         # Stores for submission XML download
         # Samples store is defined here; experiments/analysis define their own stores
         dcc.Store(id="samples-submission-results-store"),
+        dcc.Store(id="samples-pending-result"),
         dcc.Download(id='download-table-csv'),
         dcc.Download(id='download-table-csv-analysis'),
         dcc.Download(id='download-table-csv-experiments'),
@@ -2554,17 +2555,19 @@ def _disable_submit(u, p, v):
 
 
 def _build_submission_progress_msg(job, status):
-    labels = {
+    stage_labels = {
+        "preparing": "Preparing submission\u2026",
+        "submitting": "Submitting samples to BioSamples\u2026",
+        "relationships": "Linking sample relationships\u2026",
+    }
+    status_labels = {
         "queued": "Submission queued\u2026",
         "running": "Submitting to BioSamples\u2026",
         "retrying": "Retrying submission\u2026",
     }
-    label = labels.get((status or "").lower(), "Working\u2026")
+    stage = (job.get("stage") or "").lower()
+    label = stage_labels.get(stage) or status_labels.get((status or "").lower(), "Working\u2026")
     parts = [html.Span(label, style={"fontWeight": 600})]
-
-    stage = job.get("stage")
-    if stage:
-        parts += [html.Br(), html.Span(f"Stage: {stage}")]
 
     total = job.get("total")
     submitted = job.get("submitted")
@@ -2848,6 +2851,7 @@ def _start_biosamples_submission(n, username, password, env, action, v):
         Output("samples-submission-results-store", "data"),
         Output("samples-submission-results-xml-download", "data", allow_duplicate=True),
         Output("submission-poller", "disabled", allow_duplicate=True),
+        Output("samples-pending-result", "data"),
     ],
     Input("submission-poller", "n_intervals"),
     State("submission-job-id", "data"),
@@ -2861,7 +2865,7 @@ def _poll_biosamples_submission(n_intervals, job_id, env):
     def _stop_with_message(text, color="#c62828"):
         msg = html.Span(text, style={"color": color, "fontWeight": 500})
         return (msg, dash.no_update, dash.no_update, dash.no_update,
-                dash.no_update, dash.no_update, True)
+                dash.no_update, dash.no_update, True, dash.no_update)
 
     try:
         url = f"{BACKEND_API_URL}/submission-jobs/{job_id}"
@@ -2878,15 +2882,19 @@ def _poll_biosamples_submission(n_intervals, job_id, env):
         if status in ("queued", "running", "retrying"):
             msg = _build_submission_progress_msg(job, status)
             return (msg, dash.no_update, dash.no_update, dash.no_update,
-                    dash.no_update, dash.no_update, False)
+                    dash.no_update, dash.no_update, False, dash.no_update)
 
         if status == "complete":
             result = dict(job.get("result") or {})
             result.setdefault("success", True)
             if not result.get("message"):
                 result["message"] = job.get("message") or "Submission complete."
-            rendered = _render_samples_submission_result(result, env)
-            return (*rendered, True)
+            generating_msg = html.Div(
+                "Submission complete — generating results table…",
+                style={"color": "#1565c0", "fontWeight": 600, "marginTop": "10px"},
+            )
+            return (generating_msg, dash.no_update, dash.no_update, dash.no_update,
+                    dash.no_update, dash.no_update, True, result)
 
         if status == "failed":
             # result may be null when the task raised (retries exhausted); fall
@@ -2904,16 +2912,35 @@ def _poll_biosamples_submission(n_intervals, job_id, env):
             if result.get("submitted_count") is None and job.get("submitted") is not None:
                 result["submitted_count"] = job.get("submitted")
             rendered = _render_samples_submission_result(result, env)
-            return (*rendered, True)
+            return (*rendered, True, dash.no_update)
 
         # Unknown / unexpected status
         return (dash.no_update, dash.no_update, dash.no_update, dash.no_update,
-                dash.no_update, dash.no_update, False)
+                dash.no_update, dash.no_update, False, dash.no_update)
 
     except Exception as e:
         return _stop_with_message(f"Error checking submission status: {e}")
 
 
+@app.callback(
+    [
+        Output("biosamples-submit-msg-samples", "children", allow_duplicate=True),
+        Output("biosamples-results-table-samples", "children", allow_duplicate=True),
+        Output("samples-submission-results-panel", "children", allow_duplicate=True),
+        Output("samples-submission-results-panel", "style", allow_duplicate=True),
+        Output("samples-submission-results-store", "data", allow_duplicate=True),
+        Output("samples-submission-results-xml-download", "data", allow_duplicate=True),
+    ],
+    Input("samples-pending-result", "data"),
+    State("submission-env", "data"),
+    prevent_initial_call=True,
+)
+def _render_samples_results(result, env):
+    if not result:
+        raise PreventUpdate
+    import time  # TEMP demo: remove these two lines after verifying the message
+    time.sleep(2)  # TEMP demo: makes 'generating…' visible even on small files
+    return _render_samples_submission_result(result, env)
 
 
 @app.callback(
