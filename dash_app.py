@@ -2596,8 +2596,7 @@ def _build_submission_progress_msg(job, status):
 
     return html.Div(children, style={
         "color": fg, "backgroundColor": bg,
-        "borderLeft": f"5px solid {accent}", "borderRadius": "8px",
-        "padding": "12px 16px", "marginTop": "10px",
+        "padding": "12px 16px 20px", "marginTop": "10px", "marginBottom": "50px",
         "boxShadow": "0 1px 3px rgba(0,0,0,0.08)",
     })
 
@@ -2918,8 +2917,7 @@ def _poll_biosamples_submission(n_intervals, job_id, env):
                 "Submission complete — generating results table…",
                 style={
                     "color": "#1b5e20", "backgroundColor": "#e8f5e9",
-                    "borderLeft": "5px solid #2e7d32", "borderRadius": "8px",
-                    "padding": "12px 16px", "marginTop": "10px",
+                    "padding": "12px 16px 20px", "marginTop": "10px", "marginBottom": "50px",
                     "fontWeight": 700, "boxShadow": "0 1px 3px rgba(0,0,0,0.08)",
                 },
             )
