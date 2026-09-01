@@ -103,6 +103,10 @@ def create_biosamples_form_analysis():
             dcc.Store(id="analysis-submission-results-store"),
             # Download component for XML receipt
             dcc.Download(id="analysis-submission-results-xml-download"),
+            # Async submission: job id store + polling timer
+            dcc.Store(id="analysis-submission-job-id"),
+            dcc.Interval(id="analysis-submission-poller", interval=2000,
+                         n_intervals=0, disabled=True),
         ],
         id="biosamples-form-ena-analysis",
         style={"display": "none", "marginTop": "16px"},
@@ -110,7 +114,7 @@ def create_biosamples_form_analysis():
 
 # Backend API URL - can be configured via environment variable
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
-                                 'https://faang-validator-backend-service-341387543760.europe-west2.run.app')
+                                 'https://api.faang.org/validation-v2')
 
 
 def get_all_errors_and_warnings(record):
@@ -183,6 +187,133 @@ def _valid_invalid_analysis_counts(v):
         return int(s.get("valid_analyses", 0)), int(s.get("invalid_analyses", 0))
     except Exception:
         return 0, 0
+
+
+
+
+def _build_analysis_progress_msg(job, status):
+    labels = {
+        "queued": "Submission queued\u2026",
+        "running": "Submitting to ENA\u2026",
+        "retrying": "Retrying submission\u2026",
+    }
+    label = labels.get((status or "").lower(), "Working\u2026")
+    parts = [html.Span(label, style={"fontWeight": 600})]
+
+    stage = job.get("stage")
+    if stage:
+        parts += [html.Br(), html.Span(f"Stage: {stage}")]
+
+    total = job.get("total")
+    submitted = job.get("submitted")
+    if total:
+        parts += [html.Br(), html.Span(f"Progress: {submitted or 0}/{total}")]
+
+    return html.Div(parts, style={"color": "#1565c0", "marginTop": "10px"})
+
+
+def _render_analysis_submission_result(data):
+    success = data.get("success", False)
+    message = data.get("message", "No message from server")
+    submitted_count = data.get("submitted_count")
+    errors = data.get("errors") or []
+    info_messages = data.get("info_messages") or []
+    submission_results_xml = data.get("submission_results") or ""
+
+    color = "#388e3c" if success else "#c62828"
+
+    msg_children = [html.Span(message, style={"fontWeight": 500})]
+    if submitted_count is not None:
+        msg_children += [
+            html.Br(),
+            html.Span(f"Submitted analyses: {submitted_count}"),
+        ]
+
+
+
+    msg = html.Div(msg_children, style={"color": color})
+    table = html.Div()
+
+    # Build submission results panel content
+    panel_children = []
+    if errors or info_messages or submission_results_xml:
+        panel_children = [
+            html.Div(
+                [
+                    html.H3(
+                        "Submission Results",
+                        style={
+                            "marginBottom": "0",
+                            "marginTop": "0",
+                            "lineHeight": "1.2",
+                        },
+                    ),
+                    html.Button(
+                        "Download submission results",
+                        id="analysis-download-submission-xml-btn",
+                        n_clicks=0,
+                        style={
+                            "backgroundColor": "#ffd740",
+                            "color": "black",
+                            "padding": "8px 16px",
+                            "border": "none",
+                            "borderRadius": "6px",
+                            "cursor": "pointer",
+                            "fontSize": "14px",
+                            "marginLeft": "16px",
+                        },
+                    ),
+                ],
+                style={
+                    "display": "flex",
+                    "alignItems": "center",
+                    "justifyContent": "space-between",
+                    "gap": "16px",
+                    "marginBottom": "8px",
+                },
+            ),
+        ]
+
+        if info_messages:
+            panel_children.append(
+                html.Div(
+                    [
+                        html.Ul(
+                            [html.Li(m) for m in info_messages],
+                            style={
+                                "marginLeft": "20px",
+                                "color": "#475569",
+                            },
+                        ),
+                    ]
+                )
+            )
+
+        # Detailed submission errors after info
+        if errors:
+            panel_children.append(
+                html.Div(
+                    [
+                        html.Ul(
+                            [html.Li(e) for e in errors],
+                            style={
+                                "marginLeft": "20px",
+                                "color": "#b91c1c",
+                            },
+                        ),
+                    ]
+                )
+            )
+
+    panel_style = {
+        "display": "block" if panel_children else "none",
+        "marginTop": "20px",
+        "padding": "16px",
+        "borderRadius": "8px",
+        "backgroundColor": "#f8fafc",
+    }
+
+    return msg, table, panel_children, panel_style, submission_results_xml
 
 
 def register_analysis_callbacks(app):
@@ -598,7 +729,9 @@ def register_analysis_callbacks(app):
             Output("biosamples-results-table-analysis", "children"),
             Output("analysis-submission-results-panel", "children"),
             Output("analysis-submission-results-panel", "style"),
-            Output("analysis-submission-results-store", "data"),
+            Output("analysis-submission-job-id", "data"),
+            Output("analysis-submission-poller", "disabled"),
+            Output("analysis-submission-poller", "n_intervals"),
         ],
         Input("biosamples-submit-btn-ena-analysis", "n_clicks"),
         State("biosamples-username-ena-analysis", "value"),
@@ -608,39 +741,28 @@ def register_analysis_callbacks(app):
         State("stored-parsed-json-analysis", "data"),
         prevent_initial_call=True,
     )
-    def _submit_to_biosamples_analysis(n, username, password, action, v, original_data):
-        """Submit to BioSamples for Analysis tab"""
+    def _start_analysis_submission(n, username, password, action, v, original_data):
         if not n:
             raise PreventUpdate
 
         hidden_style = {"display": "none"}
 
+        def _error(text):
+            msg = html.Span(text, style={"color": "#c62828", "fontWeight": 500})
+            return (msg, dash.no_update, dash.no_update, dash.no_update, None, True, 0)
+
         if not v or "results" not in v:
-            msg = html.Span(
-                "No validation results available. Please validate your file first.",
-                style={"color": "#c62828", "fontWeight": 500},
-            )
-            return msg, dash.no_update, dash.no_update, hidden_style, None
+            return _error("No validation results available. Please validate your file first.")
 
         valid_cnt, invalid_cnt = _valid_invalid_analysis_counts(v)
         if valid_cnt == 0:
-            msg = html.Span(
-                "No valid analyses to submit. Please fix errors and re-validate.",
-                style={"color": "#c62828", "fontWeight": 500},
-            )
-            return msg, dash.no_update, dash.no_update, hidden_style, None
+            return _error("No valid analyses to submit. Please fix errors and re-validate.")
 
         if not username or not password:
-            msg = html.Span(
-                "Please enter Webin username and password.",
-                style={"color": "#c62828", "fontWeight": 500},
-            )
-            return msg, dash.no_update, dash.no_update, hidden_style, None
-
-        validation_results = v["results"]
+            return _error("Please enter Webin username and password.")
 
         body = {
-            "validation_results": validation_results,
+            "validation_results": v["results"],
             "original_data": original_data,
             "webin_username": username,
             "webin_password": password,
@@ -649,127 +771,84 @@ def register_analysis_callbacks(app):
         }
 
         try:
-            url = f"{BACKEND_API_URL}/submit-analysis"
-            r = requests.post(url, json=body, timeout=600)
-
+            url = f"{BACKEND_API_URL}/submit-analysis-async"
+            r = requests.post(url, json=body, timeout=30)
             if not r.ok:
-                msg = html.Span(
-                    f"Submission failed [{r.status_code}]: {r.text}",
-                    style={"color": "#c62828", "fontWeight": 500},
-                )
-                return msg, dash.no_update, dash.no_update, hidden_style, None
-
+                return _error(f"Submission failed to start [{r.status_code}]: {r.text}")
             data = r.json() if r.content else {}
-
-            success = data.get("success", False)
-            message = data.get("message", "No message from server")
-            submitted_count = data.get("submitted_count")
-            errors = data.get("errors") or []
-            info_messages = data.get("info_messages") or []
-            submission_results_xml = data.get("submission_results") or ""
-            biosamples_ids = data.get("biosamples_ids") or {}
-
-            color = "#388e3c" if success else "#c62828"
-
-            msg_children = [html.Span(message, style={"fontWeight": 500})]
-            if submitted_count is not None:
-                msg_children += [
-                    html.Br(),
-                    html.Span(f"Submitted analyses: {submitted_count}"),
-                ]
-
-
-
-            msg = html.Div(msg_children, style={"color": color})
-            table = html.Div()
-
-            # Build submission results panel content (no inline XML; info + errors + yellow button)
-            panel_children = []
-            if errors or info_messages or submission_results_xml:
-                panel_children = [
-                    html.Div(
-                        [
-                            html.H3(
-                                "Submission Results",
-                                style={
-                                    "marginBottom": "0",
-                                    "marginTop": "0",
-                                    "lineHeight": "1.2",
-                                },
-                            ),
-                            html.Button(
-                                "Download submission results",
-                                id="analysis-download-submission-xml-btn",
-                                n_clicks=0,
-                                style={
-                                    "backgroundColor": "#ffd740",
-                                    "color": "black",
-                                    "padding": "8px 16px",
-                                    "border": "none",
-                                    "borderRadius": "6px",
-                                    "cursor": "pointer",
-                                    "fontSize": "14px",
-                                    "marginLeft": "16px",
-                                },
-                            ),
-                        ],
-                        style={
-                            "display": "flex",
-                            "alignItems": "center",
-                            "justifyContent": "space-between",
-                            "gap": "16px",
-                            "marginBottom": "8px",
-                        },
-                    ),
-                ]
-
-                if info_messages:
-                    panel_children.append(
-                        html.Div(
-                            [
-                                html.Ul(
-                                    [html.Li(m) for m in info_messages],
-                                    style={
-                                        "marginLeft": "20px",
-                                        "color": "#475569",
-                                    },
-                                ),
-                            ]
-                        )
-                    )
-
-                # Detailed submission errors after info (no heading)
-                if errors:
-                    panel_children.append(
-                        html.Div(
-                            [
-                                html.Ul(
-                                    [html.Li(e) for e in errors],
-                                    style={
-                                        "marginLeft": "20px",
-                                        "color": "#b91c1c",
-                                    },
-                                ),
-                            ]
-                        )
-                    )
-
-            panel_style = {
-                "display": "block" if panel_children else "none",
-                "marginTop": "20px",
-                "padding": "16px",
-                "borderRadius": "8px",
-                "backgroundColor": "#f8fafc",
-            }
-
-            return msg, table, panel_children, panel_style, submission_results_xml
-
+            job_id = data.get("job_id")
+            if not job_id:
+                return _error("Backend did not return a job_id for the async submission.")
+            status_msg = _build_analysis_progress_msg(data, data.get("status") or "queued")
+            return (status_msg, None, [], hidden_style, job_id, False, 0)
         except Exception as e:
-            msg = html.Span(
-                f"Submission error: {e}",
-                style={"color": "#c62828", "fontWeight": 500},
-            )
-            return msg, dash.no_update, dash.no_update, hidden_style, None
+            return _error(f"Submission error: {e}")
+
+    @app.callback(
+        [
+            Output("biosamples-submit-msg-ena-analysis", "children", allow_duplicate=True),
+            Output("biosamples-results-table-analysis", "children", allow_duplicate=True),
+            Output("analysis-submission-results-panel", "children", allow_duplicate=True),
+            Output("analysis-submission-results-panel", "style", allow_duplicate=True),
+            Output("analysis-submission-results-store", "data"),
+            Output("analysis-submission-poller", "disabled", allow_duplicate=True),
+        ],
+        Input("analysis-submission-poller", "n_intervals"),
+        State("analysis-submission-job-id", "data"),
+        prevent_initial_call=True,
+    )
+    def _poll_analysis_submission(n_intervals, job_id):
+        """Poll the async analysis submission job and render results when it finishes."""
+        if not job_id:
+            raise PreventUpdate
+
+        def _stop_with_message(text, color="#c62828"):
+            msg = html.Span(text, style={"color": color, "fontWeight": 500})
+            return (msg, dash.no_update, dash.no_update, dash.no_update, dash.no_update, True)
+
+        try:
+            url = f"{BACKEND_API_URL}/submission-jobs/{job_id}"
+            r = requests.get(url, timeout=30)
+            if not r.ok:
+                return _stop_with_message(
+                    f"Could not fetch job status [{r.status_code}]: {r.text}")
+
+            job = r.json() if r.content else {}
+            status = (job.get("status") or "").lower()
+
+            if status in ("queued", "running", "retrying"):
+                msg = _build_analysis_progress_msg(job, status)
+                return (msg, dash.no_update, dash.no_update, dash.no_update,
+                        dash.no_update, False)
+
+            if status == "complete":
+                result = dict(job.get("result") or {})
+                result.setdefault("success", True)
+                if not result.get("message"):
+                    result["message"] = job.get("message") or "Submission complete."
+                rendered = _render_analysis_submission_result(result)
+                return (*rendered, True)
+
+            if status == "failed":
+                result = dict(job.get("result") or {})
+                result["success"] = False
+                if not result.get("message"):
+                    result["message"] = (
+                        job.get("message") or job.get("error") or "Submission failed.")
+                top_errors = job.get("errors")
+                if not top_errors and job.get("error"):
+                    top_errors = [job.get("error")]
+                if top_errors and not result.get("errors"):
+                    result["errors"] = top_errors
+                if result.get("submitted_count") is None and job.get("submitted") is not None:
+                    result["submitted_count"] = job.get("submitted")
+                rendered = _render_analysis_submission_result(result)
+                return (*rendered, True)
+
+            return (dash.no_update, dash.no_update, dash.no_update, dash.no_update,
+                    dash.no_update, False)
+        except Exception as e:
+            return _stop_with_message(f"Error checking submission status: {e}")
 
     # Download callback for submission results XML (analysis tab)
     @app.callback(

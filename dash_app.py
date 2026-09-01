@@ -16,7 +16,7 @@ from tab_components import create_tab_content
 
 # Backend API URL - can be configured via environment variable
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
-                                 'https://faang-validator-backend-service-341387543760.europe-west2.run.app')
+                                 'https://api.faang.org/validation-v2')
 
 # Initialize the Dash app
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
@@ -619,6 +619,7 @@ app.layout = html.Div([
         # Stores for submission XML download
         # Samples store is defined here; experiments/analysis define their own stores
         dcc.Store(id="samples-submission-results-store"),
+        dcc.Store(id="samples-pending-result"),
         dcc.Download(id='download-table-csv'),
         dcc.Download(id='download-table-csv-analysis'),
         dcc.Download(id='download-table-csv-experiments'),
@@ -2555,15 +2556,280 @@ def _disable_submit(u, p, v):
     return not is_enabled, enabled_style if is_enabled else disabled_style
 
 
+def _build_submission_progress_msg(job, status):
+    stage_styles = {
+        "preparing":     ("Preparing submission…",             "#e0f2f1", "#00897b", "#00695c"),
+        "submitting":    ("Submitting samples to BioSamples…", "#e3f2fd", "#1565c0", "#0d47a1"),
+        "relationships": ("Linking sample relationships…",     "#ede7f6", "#5e35b1", "#4527a0"),
+    }
+    status_styles = {
+        "queued":   ("Submission queued…",       "#eceff1", "#607d8b", "#37474f"),
+        "running":  ("Submitting to BioSamples…", "#e3f2fd", "#1565c0", "#0d47a1"),
+        "retrying": ("Retrying submission…",      "#fff8e1", "#ff8f00", "#e65100"),
+    }
+    stage = (job.get("stage") or "").lower()
+    label, bg, accent, fg = (
+        stage_styles.get(stage)
+        or status_styles.get((status or "").lower())
+        or ("Working…", "#eceff1", "#607d8b", "#37474f")
+    )
+
+    total = job.get("total")
+    submitted = job.get("submitted") or 0
+
+    children = [html.Div(label, style={"fontWeight": 700, "fontSize": "15px"})]
+    if total:
+        pct = max(0, min(100, round(100 * submitted / total)))
+        children.append(html.Div(
+            f"{submitted} / {total}  ({pct}%)",
+            style={"fontSize": "13px", "marginTop": "3px", "opacity": 0.85},
+        ))
+        children.append(html.Div(
+            html.Div(style={
+                "width": f"{pct}%", "height": "100%", "backgroundColor": accent,
+                "borderRadius": "5px", "transition": "width 0.3s ease",
+            }),
+            style={
+                "marginTop": "8px", "height": "9px", "width": "100%",
+                "backgroundColor": "rgba(0,0,0,0.08)", "borderRadius": "5px",
+                "overflow": "hidden",
+            },
+        ))
+
+    return html.Div(children, style={
+        "color": fg, "backgroundColor": bg,
+        "padding": "12px 16px 20px", "marginTop": "10px", "marginBottom": "50px",
+        "boxShadow": "0 1px 3px rgba(0,0,0,0.08)",
+    })
+
+
+def _render_samples_submission_result(data, env):
+    success = data.get("success", False)
+    message = data.get("message", "No message from server")
+    submitted_count = data.get("submitted_count")
+    errors = data.get("errors") or []
+    failed_sample = data.get("failed_sample")
+    status_code = data.get("status_code")
+    details = data.get("details")
+
+    if isinstance(errors, str):
+        errors = [errors]
+    elif isinstance(errors, dict):
+        errors = [errors.get("message") or errors.get("error") or str(errors)]
+    elif not isinstance(errors, list):
+        errors = [str(errors)]
+    else:
+        errors = [
+            (err.get("message") or err.get("error") or str(err))
+            if isinstance(err, dict)
+            else str(err)
+            for err in errors
+        ]
+
+    errors = [err for err in errors if err]
+    biosamples_ids = data.get("biosamples_ids") or {}
+    successful_count = submitted_count if submitted_count is not None else len(biosamples_ids)
+
+    sections = []
+
+    if biosamples_ids:
+        if success:
+            success_title = f"{successful_count} sample(s) were submitted successfully to BioSamples."
+            success_body = "Keep the BioSample IDs shown below for future updates."
+        else:
+            success_title = f"{successful_count} sample(s) were submitted before the failure."
+            success_body = "Do not submit these again as new samples. Keep the BioSample IDs shown below."
+
+        sections.append(
+            html.Div(
+                [
+                    html.Div(
+                        success_title,
+                        style={"fontWeight": 700, "marginBottom": "6px"},
+                    ),
+                    html.Div(success_body),
+                ],
+                style={
+                    "backgroundColor": "#e8f5e9",
+                    "border": "1px solid #a5d6a7",
+                    "borderRadius": "6px",
+                    "padding": "12px",
+                    "color": "#1b5e20",
+                    "marginBottom": "12px",
+                },
+            )
+        )
+
+    if not success:
+        failure_items = []
+
+        if failed_sample:
+            failure_items.append(html.Li([html.Strong("Failed sample: "), failed_sample]))
+        if status_code:
+            failure_items.append(html.Li([html.Strong("Status: "), str(status_code)]))
+        if details:
+            failure_items.append(html.Li([html.Strong("Details: "), details]))
+
+        for err in errors:
+            if err and err != details:
+                failure_items.append(html.Li(err))
+
+        if not failure_items:
+            failure_items.append(html.Li(message or "Submission failed"))
+
+        sections.append(
+            html.Div(
+                [
+                    html.Div(
+                        "Submission failed",
+                        style={"fontWeight": 700, "marginBottom": "6px"},
+                    ),
+                    html.Ul(failure_items, style={"margin": 0, "paddingLeft": "20px"}),
+                ],
+                style={
+                    "backgroundColor": "#fff5f5",
+                    "border": "1px solid #f5c2c7",
+                    "borderRadius": "6px",
+                    "padding": "12px",
+                    "color": "#842029",
+                    "maxWidth": "900px",
+                    "whiteSpace": "pre-wrap",
+                },
+            )
+        )
+
+    msg = html.Div(sections, style={"marginTop": "10px"})
+
+    table = None
+    if biosamples_ids:
+        biosamples_base_url = (
+            "https://wwwdev.ebi.ac.uk/biosamples/samples"
+            if env == "test"
+            else "https://www.ebi.ac.uk/biosamples/samples"
+        )
+
+        table_data = [
+            {"Sample Name": name, "BioSample ID": acc}
+            for name, acc in biosamples_ids.items()
+        ]
+
+        for row in table_data:
+            acc = row.get("BioSample ID")
+            if acc:
+                row["BioSample ID"] = f"[{acc}]({biosamples_base_url}/{acc})"
+
+        table = dash_table.DataTable(
+            data=table_data,
+            columns=[
+                {"name": "Sample Name", "id": "Sample Name"},
+                {
+                    "name": "BioSample ID",
+                    "id": "BioSample ID",
+                    "presentation": "markdown",
+                },
+            ],
+            page_size=10,
+            style_table={"overflowX": "auto"},
+            style_cell={"textAlign": "left"},
+            css=[
+                {
+                    "selector": ".dash-cell a",
+                    "rule": (
+                        "color: #4682b4;"
+                        "font-family: ui-monospace, SFMono-Regular, Menlo, monospace;"
+                        "font-weight: 600;"
+                        "text-decoration: none;"
+                        "border-bottom: 1px solid rgba(70,130,180,0.35);"
+                        "padding-bottom: 1px;"
+                        "transition: color 0.15s ease, border-color 0.15s ease;"
+                    ),
+                },
+                {
+                    "selector": ".dash-cell a:hover",
+                    "rule": "color: #2c5f8a; border-bottom-color: #2c5f8a;",
+                },
+                {
+                    "selector": ".dash-cell a:visited",
+                    "rule": "color: #4682b4;",
+                },
+            ],
+        )
+
+    panel_children = []
+    if biosamples_ids:
+        panel_children = [
+            html.Div(
+                [
+                    html.H3(
+                        "Submission Results",
+                        style={
+                            "marginBottom": "0",
+                            "marginTop": "0",
+                            "lineHeight": "1.2",
+                        },
+                    ),
+                    html.Button(
+                        "Download submission results",
+                        id="samples-download-submission-xml-btn",
+                        n_clicks=0,
+                        style={
+                            "backgroundColor": "#ffd740",
+                            "color": "black",
+                            "padding": "8px 16px",
+                            "border": "none",
+                            "borderRadius": "6px",
+                            "cursor": "pointer",
+                            "fontSize": "14px",
+                            "marginLeft": "16px",
+                        },
+                    ),
+                ],
+                style={
+                    "display": "flex",
+                    "alignItems": "center",
+                    "justifyContent": "space-between",
+                    "gap": "16px",
+                    "marginBottom": "8px",
+                },
+            ),
+        ]
+
+    panel_style = {
+        "display": "block" if panel_children else "none",
+        "marginTop": "20px",
+        "padding": "16px",
+        "borderRadius": "8px",
+        "backgroundColor": "#f8fafc",
+    }
+
+    auto_download = (
+        dcc.send_string(
+            "\n".join(
+                ["Sample Name\tBioSample ID"] +
+                [
+                    f"{str(name).replace(chr(9), ' ').replace(chr(10), ' ')}\t{str(acc).replace(chr(9), ' ').replace(chr(10), ' ')}"
+                    for name, acc in biosamples_ids.items()
+                ]
+            ),
+            "biosample_submission_results.tsv",
+        )
+        if biosamples_ids
+        else dash.no_update
+    )
+
+    return msg, table, panel_children, panel_style, biosamples_ids, auto_download
+
+
 @app.callback(
     [
         Output("biosamples-submit-msg-samples", "children"),
         Output("biosamples-results-table-samples", "children"),
         Output("samples-submission-results-panel", "children"),
         Output("samples-submission-results-panel", "style"),
-        Output("samples-submission-results-store", "data"),
-        Output("samples-submission-results-xml-download", "data", allow_duplicate=True),
-
+        Output("submission-job-id", "data"),
+        Output("submission-env", "data"),
+        Output("submission-poller", "disabled"),
+        Output("submission-poller", "n_intervals"),
     ],
     Input("biosamples-submit-btn-samples", "n_clicks"),
     State("biosamples-username-samples", "value"),
@@ -2573,38 +2839,30 @@ def _disable_submit(u, p, v):
     State("stored-json-validation-results", "data"),
     prevent_initial_call=True,
 )
-def _submit_to_biosamples(n, username, password, env, action, v):
+def _start_biosamples_submission(n, username, password, env, action, v):
     if not n:
         raise PreventUpdate
 
     hidden_style = {"display": "none"}
 
+    def _error(text):
+        msg = html.Span(text, style={"color": "#c62828", "fontWeight": 500})
+        # Leave previous results untouched; do not start the poller.
+        return (msg, dash.no_update, dash.no_update, dash.no_update,
+                None, None, True, 0)
+
     if not v or "results" not in v:
-        msg = html.Span(
-            "No validation results available. Please validate your file first.",
-            style={"color": "#c62828", "fontWeight": 500},
-        )
-        return msg, dash.no_update, dash.no_update, hidden_style, None, dash.no_update
+        return _error("No validation results available. Please validate your file first.")
 
     valid_cnt, invalid_cnt = _valid_invalid_counts(v)
     if valid_cnt == 0:
-        msg = html.Span(
-            "No valid samples to submit. Please fix errors and re-validate.",
-            style={"color": "#c62828", "fontWeight": 500},
-        )
-        return msg, dash.no_update, dash.no_update, hidden_style, None, dash.no_update
+        return _error("No valid samples to submit. Please fix errors and re-validate.")
 
     if not username or not password:
-        msg = html.Span(
-            "Please enter Webin username and password.",
-            style={"color": "#c62828", "fontWeight": 500},
-        )
-        return msg, dash.no_update, dash.no_update, hidden_style, None, dash.no_update
-
-    validation_results = v["results"]
+        return _error("Please enter Webin username and password.")
 
     body = {
-        "validation_results": validation_results,
+        "validation_results": v["results"],
         "webin_username": username,
         "webin_password": password,
         "mode": env,
@@ -2612,225 +2870,127 @@ def _submit_to_biosamples(n, username, password, env, action, v):
     }
 
     try:
-        url = f"{BACKEND_API_URL}/submit-to-biosamples"
-        r = requests.post(url, json=body, timeout=600)
+        url = f"{BACKEND_API_URL}/submit-to-biosamples-async"
+        r = requests.post(url, json=body, timeout=30)
 
         if not r.ok:
-            msg = html.Span(
-                f"Submission failed [{r.status_code}]: {r.text}",
-                style={"color": "#c62828", "fontWeight": 500},
-            )
-            return msg, dash.no_update, dash.no_update, hidden_style, None, dash.no_update
+            return _error(f"Submission failed to start [{r.status_code}]: {r.text}")
 
         data = r.json() if r.content else {}
+        job_id = data.get("job_id")
+        if not job_id:
+            return _error("Backend did not return a job_id for the async submission.")
 
-        success = data.get("success", False)
-        message = data.get("message", "No message from server")
-        submitted_count = data.get("submitted_count")
-        errors = data.get("errors") or []
-        failed_sample = data.get("failed_sample")
-        status_code = data.get("status_code")
-        details = data.get("details")
+        status_msg = _build_submission_progress_msg(data, data.get("status") or "queued")
 
-        if isinstance(errors, str):
-            errors = [errors]
-        elif isinstance(errors, dict):
-            errors = [errors.get("message") or errors.get("error") or str(errors)]
-        elif not isinstance(errors, list):
-            errors = [str(errors)]
-        else:
-            errors = [
-                (err.get("message") or err.get("error") or str(err))
-                if isinstance(err, dict)
-                else str(err)
-                for err in errors
-            ]
-
-        errors = [err for err in errors if err]
-
-
-        info_messages = data.get("info_messages") or []
-        submission_results_xml = data.get("submission_results") or ""
-        biosamples_ids = data.get("biosamples_ids") or {}
-
-        color = "#388e3c" if success else "#c62828"
-
-        successful_count = submitted_count if submitted_count is not None else len(biosamples_ids)
-
-        sections = []
-
-        if biosamples_ids:
-            if success:
-                success_title = f"{successful_count} sample(s) were submitted successfully to BioSamples."
-                success_body = "Keep the BioSample IDs shown below for future updates."
-            else:
-                success_title = f"{successful_count} sample(s) were submitted before the failure."
-                success_body = "Do not submit these again as new samples. Keep the BioSample IDs shown below."
-
-            sections.append(
-                html.Div(
-                    [
-                        html.Div(
-                            success_title,
-                            style={"fontWeight": 700, "marginBottom": "6px"},
-                        ),
-                        html.Div(success_body),
-                    ],
-                    style={
-                        "backgroundColor": "#e8f5e9",
-                        "border": "1px solid #a5d6a7",
-                        "borderRadius": "6px",
-                        "padding": "12px",
-                        "color": "#1b5e20",
-                        "marginBottom": "12px",
-                    },
-                )
-            )
-
-        if not success:
-            failure_items = []
-
-            if failed_sample:
-                failure_items.append(html.Li([html.Strong("Failed sample: "), failed_sample]))
-            if status_code:
-                failure_items.append(html.Li([html.Strong("Status: "), str(status_code)]))
-            if details:
-                failure_items.append(html.Li([html.Strong("Details: "), details]))
-
-            for err in errors:
-                if err and err != details:
-                    failure_items.append(html.Li(err))
-
-            if not failure_items:
-                failure_items.append(html.Li(message or "Submission failed"))
-
-            sections.append(
-                html.Div(
-                    [
-                        html.Div(
-                            "Submission failed",
-                            style={"fontWeight": 700, "marginBottom": "6px"},
-                        ),
-                        html.Ul(failure_items, style={"margin": 0, "paddingLeft": "20px"}),
-                    ],
-                    style={
-                        "backgroundColor": "#fff5f5",
-                        "border": "1px solid #f5c2c7",
-                        "borderRadius": "6px",
-                        "padding": "12px",
-                        "color": "#842029",
-                        "maxWidth": "900px",
-                        "whiteSpace": "pre-wrap",
-                    },
-                )
-            )
-
-        msg = html.Div(sections, style={"marginTop": "10px"})
-
-        table = None
-        if biosamples_ids:
-            biosamples_base_url = (
-                "https://wwwdev.ebi.ac.uk/biosamples/samples"
-                if env == "test"
-                else "https://www.ebi.ac.uk/biosamples/samples"
-            )
-
-            table_data = [
-                {"Sample Name": name, "BioSample ID": acc}
-                for name, acc in biosamples_ids.items()
-            ]
-
-            for row in table_data:
-                acc = row.get("BioSample ID")
-                if acc:
-                    row["BioSample ID"] = f"[{acc}]({biosamples_base_url}/{acc})"
-
-            table = dash_table.DataTable(
-                data=table_data,
-                columns=[
-                    {"name": "Sample Name", "id": "Sample Name"},
-                    {
-                        "name": "BioSample ID",
-                        "id": "BioSample ID",
-                        "presentation": "markdown",
-                    },
-                ],
-                page_size=10,
-                style_table={"overflowX": "auto"},
-                style_cell={"textAlign": "left"},
-            )
-        # Only show the Submission Results panel when we also have a table
-        panel_children = []
-        if biosamples_ids:
-            panel_children = [
-                html.Div(
-                    [
-                        html.H3(
-                            "Submission Results",
-                            style={
-                                "marginBottom": "0",
-                                "marginTop": "0",
-                                "lineHeight": "1.2",
-                            },
-                        ),
-                        html.Button(
-                            "Download submission results",
-                            id="samples-download-submission-xml-btn",
-                            n_clicks=0,
-                            style={
-                                "backgroundColor": "#ffd740",
-                                "color": "black",
-                                "padding": "8px 16px",
-                                "border": "none",
-                                "borderRadius": "6px",
-                                "cursor": "pointer",
-                                "fontSize": "14px",
-                                "marginLeft": "16px",
-                            },
-                        ),
-                    ],
-                    style={
-                        "display": "flex",
-                        "alignItems": "center",
-                        "justifyContent": "space-between",
-                        "gap": "16px",
-                        "marginBottom": "8px",
-                    },
-                ),
-            ]
-
-        panel_style = {
-            "display": "block" if panel_children else "none",
-            "marginTop": "20px",
-            "padding": "16px",
-            "borderRadius": "8px",
-            "backgroundColor": "#f8fafc",
-        }
-
-        auto_download = (
-            dcc.send_string(
-                "\n".join(
-                    ["Sample Name\tBioSample ID"] +
-                    [
-                        f"{str(name).replace(chr(9), ' ').replace(chr(10), ' ')}\t{str(acc).replace(chr(9), ' ').replace(chr(10), ' ')}"
-                        for name, acc in biosamples_ids.items()
-                    ]
-                ),
-                "biosample_submission_results.tsv",
-            )
-            if biosamples_ids
-            else dash.no_update
-        )
-
-        return msg, table, panel_children, panel_style, biosamples_ids, auto_download
+        # Clear any previous results, store the job + env, and enable the poller.
+        return (status_msg, None, [], hidden_style, job_id, env, False, 0)
 
     except Exception as e:
-        msg = html.Span(
-            f"Submission error: {e}",
-            style={"color": "#c62828", "fontWeight": 500},
-        )
-        return msg, dash.no_update, dash.no_update, hidden_style, None, dash.no_update
+        return _error(f"Submission error: {e}")
 
+
+@app.callback(
+    [
+        Output("biosamples-submit-msg-samples", "children", allow_duplicate=True),
+        Output("biosamples-results-table-samples", "children", allow_duplicate=True),
+        Output("samples-submission-results-panel", "children", allow_duplicate=True),
+        Output("samples-submission-results-panel", "style", allow_duplicate=True),
+        Output("samples-submission-results-store", "data"),
+        Output("samples-submission-results-xml-download", "data", allow_duplicate=True),
+        Output("submission-poller", "disabled", allow_duplicate=True),
+        Output("samples-pending-result", "data"),
+    ],
+    Input("submission-poller", "n_intervals"),
+    State("submission-job-id", "data"),
+    State("submission-env", "data"),
+    prevent_initial_call=True,
+)
+def _poll_biosamples_submission(n_intervals, job_id, env):
+    if not job_id:
+        raise PreventUpdate
+
+    def _stop_with_message(text, color="#c62828"):
+        msg = html.Span(text, style={"color": color, "fontWeight": 500})
+        return (msg, dash.no_update, dash.no_update, dash.no_update,
+                dash.no_update, dash.no_update, True, dash.no_update)
+
+    try:
+        url = f"{BACKEND_API_URL}/submission-jobs/{job_id}"
+        r = requests.get(url, timeout=30)
+
+        if not r.ok:
+            return _stop_with_message(
+                f"Could not fetch job status [{r.status_code}]: {r.text}")
+
+        job = r.json() if r.content else {}
+        status = (job.get("status") or "").lower()
+
+        # Still in flight: refresh the progress message, keep the poller running.
+        if status in ("queued", "running", "retrying"):
+            msg = _build_submission_progress_msg(job, status)
+            return (msg, dash.no_update, dash.no_update, dash.no_update,
+                    dash.no_update, dash.no_update, False, dash.no_update)
+
+        if status == "complete":
+            result = dict(job.get("result") or {})
+            result.setdefault("success", True)
+            if not result.get("message"):
+                result["message"] = job.get("message") or "Submission complete."
+            generating_msg = html.Div(
+                "Submission complete — generating results table…",
+                style={
+                    "color": "#1b5e20", "backgroundColor": "#e8f5e9",
+                    "padding": "12px 16px 20px", "marginTop": "10px", "marginBottom": "50px",
+                    "fontWeight": 700, "boxShadow": "0 1px 3px rgba(0,0,0,0.08)",
+                },
+            )
+            return (generating_msg, dash.no_update, dash.no_update, dash.no_update,
+                    dash.no_update, dash.no_update, True, result)
+
+        if status == "failed":
+            # result may be null when the task raised (retries exhausted); fall
+            # back to the top-level error/errors envelope in that case.
+            result = dict(job.get("result") or {})
+            result["success"] = False
+            if not result.get("message"):
+                result["message"] = (
+                    job.get("message") or job.get("error") or "Submission failed.")
+            top_errors = job.get("errors")
+            if not top_errors and job.get("error"):
+                top_errors = [job.get("error")]
+            if top_errors and not result.get("errors"):
+                result["errors"] = top_errors
+            if result.get("submitted_count") is None and job.get("submitted") is not None:
+                result["submitted_count"] = job.get("submitted")
+            rendered = _render_samples_submission_result(result, env)
+            return (*rendered, True, dash.no_update)
+
+        # Unknown / unexpected status
+        return (dash.no_update, dash.no_update, dash.no_update, dash.no_update,
+                dash.no_update, dash.no_update, False, dash.no_update)
+
+    except Exception as e:
+        return _stop_with_message(f"Error checking submission status: {e}")
+
+
+@app.callback(
+    [
+        Output("biosamples-submit-msg-samples", "children", allow_duplicate=True),
+        Output("biosamples-results-table-samples", "children", allow_duplicate=True),
+        Output("samples-submission-results-panel", "children", allow_duplicate=True),
+        Output("samples-submission-results-panel", "style", allow_duplicate=True),
+        Output("samples-submission-results-store", "data", allow_duplicate=True),
+        Output("samples-submission-results-xml-download", "data", allow_duplicate=True),
+    ],
+    Input("samples-pending-result", "data"),
+    State("submission-env", "data"),
+    prevent_initial_call=True,
+)
+def _render_samples_results(result, env):
+    if not result:
+        raise PreventUpdate
+    return _render_samples_submission_result(result, env)
 
 
 @app.callback(
