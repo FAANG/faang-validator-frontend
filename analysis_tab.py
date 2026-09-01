@@ -114,7 +114,7 @@ def create_biosamples_form_analysis():
 
 # Backend API URL - can be configured via environment variable
 BACKEND_API_URL = os.environ.get('BACKEND_API_URL',
-                                 'https://faang-validator-backend-service-341387543760.europe-west2.run.app')
+                                 'https://api.faang.org/validation-v2')
 
 
 def get_all_errors_and_warnings(record):
