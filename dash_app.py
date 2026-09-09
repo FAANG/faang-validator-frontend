@@ -580,23 +580,6 @@ app.layout = html.Div([
     dcc.Location(id="url", refresh=False),
     html.Div([
         html.H1("FAANG Validation"),
-        # Temporary outage banner — remove when the cluster is restored.
-        html.Div(
-            [
-                html.Strong("Service disruption: "),
-                "The FAANG website is currently unavailable because our cluster is down. "
-                "We are working to restore service.",
-            ],
-            role="alert",
-            style={
-                "backgroundColor": "#fff3cd",
-                "border": "1px solid #ffe69c",
-                "borderRadius": "4px",
-                "color": "#664d03",
-                "marginBottom": "20px",
-                "padding": "12px 16px",
-            },
-        ),
         html.Div(id='dummy-output-for-reset'),
         html.Div(id='dummy-output-for-reset-experiments'),
         html.Div(id='dummy-output-for-reset-analysis'),
